@@ -8,7 +8,7 @@ from PySide6.QtWidgets import (
 
 
 class SearchBar(QWidget):
-    search_requested   = Signal(list)   # list[str] — tag names
+    search_requested   = Signal(list, str)  # list[str] tags, str mode ("and"|"or")
     cleared            = Signal()
     untagged_requested = Signal()       # タグなし絞り込み
 
@@ -19,7 +19,7 @@ class SearchBar(QWidget):
         layout.setSpacing(6)
 
         self._input = QLineEdit()
-        self._input.setPlaceholderText("タグで検索 (スペース区切りで複数タグ AND 検索)…")
+        self._input.setPlaceholderText("タグで検索 (スペース区切りで複数タグ)…")
         self._input.returnPressed.connect(self._emit_search)
         self._input.textChanged.connect(self._on_text_changed)
 
@@ -27,6 +27,14 @@ class SearchBar(QWidget):
         self._completer.setCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
         self._completer.setFilterMode(Qt.MatchFlag.MatchContains)
         self._input.setCompleter(self._completer)
+
+        # AND / OR トグルボタン（未チェック = AND、チェック = OR）
+        self._mode_btn = QPushButton("AND")
+        self._mode_btn.setObjectName("searchModeBtn")
+        self._mode_btn.setCheckable(True)
+        self._mode_btn.setChecked(False)
+        self._mode_btn.setFixedWidth(48)
+        self._mode_btn.toggled.connect(self._on_mode_toggled)
 
         self._search_btn = QPushButton("検索")
         self._search_btn.setObjectName("primaryBtn")
@@ -42,6 +50,7 @@ class SearchBar(QWidget):
         self._clear_btn.clicked.connect(self._clear)
 
         layout.addWidget(self._input, 1)
+        layout.addWidget(self._mode_btn)
         layout.addWidget(self._untagged_btn)
         layout.addWidget(self._search_btn)
         layout.addWidget(self._clear_btn)
@@ -56,6 +65,9 @@ class SearchBar(QWidget):
         self._untagged_btn.blockSignals(False)
         self._input.setText(text)
 
+    def _on_mode_toggled(self, checked: bool) -> None:
+        self._mode_btn.setText("OR" if checked else "AND")
+
     def _emit_search(self) -> None:
         text = self._input.text().strip()
         tags = [t.strip().lower() for t in text.split() if t.strip()]
@@ -64,7 +76,8 @@ class SearchBar(QWidget):
             self._untagged_btn.blockSignals(True)
             self._untagged_btn.setChecked(False)
             self._untagged_btn.blockSignals(False)
-            self.search_requested.emit(tags)
+            mode = "or" if self._mode_btn.isChecked() else "and"
+            self.search_requested.emit(tags, mode)
         else:
             self.cleared.emit()
 

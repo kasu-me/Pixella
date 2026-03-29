@@ -48,6 +48,7 @@ class MainWindow(QMainWindow):
         # 現在のトップレベルビュー状態
         self._view_mode: str = "home"
         self._view_search_tags: list[str] = []
+        self._view_search_mode: str = "and"
 
         self.setWindowTitle(f"{__app_name__} {__version__}")
         self._build_ui()
@@ -275,7 +276,7 @@ class MainWindow(QMainWindow):
 
     def _on_tag_manager_search(self, tag_name: str) -> None:
         self._search_bar.set_text(tag_name)
-        self._do_search([tag_name])
+        self._do_search([tag_name], "and")
 
     # ------------------------------------------------------------------
     # Grid refresh
@@ -629,13 +630,15 @@ class MainWindow(QMainWindow):
     # Search
     # ------------------------------------------------------------------
 
-    def _do_search(self, tags: list[str]) -> None:
+    def _do_search(self, tags: list[str], mode: str = "and") -> None:
         from pixella.db.repository import search_by_tags
         self._view_mode = "search"
         self._view_search_tags = list(tags)
-        self._breadcrumb.set_search(' '.join(tags))
+        self._view_search_mode = mode
+        mode_label = "OR" if mode == "or" else "AND"
+        self._breadcrumb.set_search(f"[{mode_label}] {' '.join(tags)}")
         with get_session() as session:
-            images, groups = search_by_tags(session, tags)
+            images, groups = search_by_tags(session, tags, mode)
             cmap = all_tag_color_map(session)
 
         display = self._apply_sort(groups, images)
@@ -662,7 +665,7 @@ class MainWindow(QMainWindow):
         if self._view_mode == "untagged":
             self._show_untagged()
         elif self._view_mode == "search" and self._view_search_tags:
-            self._do_search(self._view_search_tags)
+            self._do_search(self._view_search_tags, self._view_search_mode)
         else:
             self._refresh_grid()
 

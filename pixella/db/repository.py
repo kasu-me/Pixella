@@ -373,15 +373,25 @@ def all_groups(session: Session) -> list[Group]:
 # Search
 # ---------------------------------------------------------------------------
 
-def search_by_tags(session: Session, tag_names: list[str]) -> tuple[list[Image], list[Group]]:
-    """Return images and groups that have ALL specified tags."""
+def search_by_tags(
+    session: Session,
+    tag_names: list[str],
+    mode: str = "and",
+) -> tuple[list[Image], list[Group]]:
+    """Return images and groups matching the specified tags.
+    mode='and': all tags must be present (AND search)
+    mode='or':  any tag must be present (OR search)
+    """
     if not tag_names:
         return [], []
 
     # images
     img_q = select(Image).options(selectinload(Image.tags), selectinload(Image.group))
-    for name in tag_names:
-        img_q = img_q.where(Image.tags.any(Tag.name == name.lower()))
+    if mode == "or":
+        img_q = img_q.where(or_(*[Image.tags.any(Tag.name == n.lower()) for n in tag_names]))
+    else:
+        for name in tag_names:
+            img_q = img_q.where(Image.tags.any(Tag.name == name.lower()))
     images = list(session.execute(img_q).scalars().all())
 
     # groups
@@ -390,8 +400,11 @@ def search_by_tags(session: Session, tag_names: list[str]) -> tuple[list[Image],
         selectinload(Group.tags),
         selectinload(Group.cover_image),
     )
-    for name in tag_names:
-        grp_q = grp_q.where(Group.tags.any(Tag.name == name.lower()))
+    if mode == "or":
+        grp_q = grp_q.where(or_(*[Group.tags.any(Tag.name == n.lower()) for n in tag_names]))
+    else:
+        for name in tag_names:
+            grp_q = grp_q.where(Group.tags.any(Tag.name == name.lower()))
     groups = list(session.execute(grp_q).scalars().all())
 
     return images, groups
