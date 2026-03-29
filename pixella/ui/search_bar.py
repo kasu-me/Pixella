@@ -84,6 +84,9 @@ class SearchBar(QWidget):
             mode = "or" if self._mode_btn.isChecked() else "and"
             self.search_requested.emit(tags, mode)
         else:
+            self._untagged_btn.blockSignals(True)
+            self._untagged_btn.setChecked(False)
+            self._untagged_btn.blockSignals(False)
             self.cleared.emit()
 
     def _on_text_changed(self, text: str) -> None:
