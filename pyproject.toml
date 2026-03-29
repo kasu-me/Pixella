@@ -1,0 +1,21 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.backends.legacy:build"
+
+[project]
+name = "pixella"
+version = "0.1.0"
+description = "Image organizer with tagging and grouping"
+requires-python = ">=3.11"
+dependencies = [
+    "PySide6>=6.7.0",
+    "Pillow>=10.3.0",
+    "SQLAlchemy>=2.0.0",
+]
+
+[project.scripts]
+pixella = "main:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["pixella*"]

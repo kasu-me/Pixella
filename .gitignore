@@ -1,0 +1,49 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+
+# パッケージビルド成果物
+*.egg-info/
+*.egg
+.eggs/
+dist/
+build/
+
+# 仮想環境
+.venv/
+venv/
+env/
+
+# PyInstaller
+*.spec.bak
+# ※ pixella.spec はビルド設定として管理対象に含める（除外しない）
+
+# テスト・カバレッジ
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+
+# 型チェック
+.mypy_cache/
+.ruff_cache/
+
+# エディタ
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# アプリ実行時データ（DBとサムネキャッシュはローカル限定）
+*.db
+*.sqlite
+*.sqlite3
+thumbnails/
