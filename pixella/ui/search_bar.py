@@ -67,6 +67,11 @@ class SearchBar(QWidget):
 
     def _on_mode_toggled(self, checked: bool) -> None:
         self._mode_btn.setText("OR" if checked else "AND")
+        # 検索中（入力欄にタグがある）なら即座に再検索
+        tags = [t.strip().lower() for t in self._input.text().split() if t.strip()]
+        if tags:
+            mode = "or" if checked else "and"
+            self.search_requested.emit(tags, mode)
 
     def _emit_search(self) -> None:
         text = self._input.text().strip()
