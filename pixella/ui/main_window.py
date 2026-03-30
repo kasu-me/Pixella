@@ -692,7 +692,7 @@ class MainWindow(QMainWindow):
             self._settings().setValue("json_last_dir", str(Path(path).parent))
             with get_session() as session:
                 export_json(session, path)
-            QMessageBox.information(self, "書き出し完了", f"書き出しました:\n{path}")
+            self._status.showMessage(f"書き出し完了: {path}", 5000)
 
     def _import_json(self) -> None:
         last_dir = self._settings().value("json_last_dir", "")
