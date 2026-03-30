@@ -285,6 +285,7 @@ class MainWindow(QMainWindow):
     def _refresh_grid(self) -> None:
         self._view_mode = "home"
         self._breadcrumb.set_home()
+        self.setWindowTitle(f"{__app_name__} {__version__}")
         with get_session() as session:
             self._cached_images = all_images(session)
             self._cached_groups = all_groups(session)
