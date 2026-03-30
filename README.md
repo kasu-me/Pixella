@@ -28,9 +28,7 @@
 ## 動作要件
 
 - Python 3.11 以上
-- PySide6 >= 6.7.0
-- Pillow >= 10.3.0
-- SQLAlchemy >= 2.0.0
+- 依存パッケージは `requirements.txt` を参照
 
 ## セットアップ
 
