@@ -356,6 +356,25 @@ QPushButton#tagManagerSortBtn[active="true"] {
     color: #3c82f6;
     font-weight: bold;
 }
+
+/* ---- Completion Popup ---- */
+QListWidget#completionPopup {
+    background-color: #ffffff;
+    border: 1px solid #b0b0b0;
+    border-radius: 0px;
+    padding: 2px 0;
+}
+
+QListWidget#completionPopup::item {
+    padding: 3px 8px;
+    border-radius: 0px;
+}
+
+QListWidget#completionPopup::item:selected {
+    background-color: #cce0ff;
+    color: #1a1a1a;
+    border-radius: 0px;
+}
 """
 
 DARK = """
@@ -715,6 +734,26 @@ QPushButton#tagManagerSortBtn[active="true"] {
     border-color: #89b4fa;
     color: #89b4fa;
     font-weight: bold;
+}
+
+/* ---- Completion Popup ---- */
+QListWidget#completionPopup {
+    background-color: #24273a;
+    border: 1px solid #45475a;
+    border-radius: 0px;
+    padding: 2px 0;
+    color: #cdd6f4;
+}
+
+QListWidget#completionPopup::item {
+    padding: 3px 8px;
+    border-radius: 0px;
+}
+
+QListWidget#completionPopup::item:selected {
+    background-color: #45475a;
+    color: #cdd6f4;
+    border-radius: 0px;
 }
 """
 

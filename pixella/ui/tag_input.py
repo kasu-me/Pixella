@@ -1,12 +1,215 @@
 """Tag input widget with autocomplete."""
 from __future__ import annotations
 
-from PySide6.QtCore import Qt, QSize, Signal
+from PySide6.QtCore import Qt, QPoint, Signal
 from PySide6.QtWidgets import (
-    QCompleter, QHBoxLayout, QLabel, QLineEdit,
+    QHBoxLayout, QLabel, QLineEdit, QListWidget,
     QSizePolicy, QVBoxLayout, QWidget,
 )
-from PySide6.QtGui import QKeyEvent
+from PySide6.QtGui import QKeyEvent, QInputMethodEvent
+
+
+_MAX_SUGGESTIONS = 50  # 表示する候補数の上限
+
+
+class _CompletionPopup(QListWidget):
+    """
+    キーボードフォーカスを奪わない補完ポップアップ。
+
+    標準の QCompleter は内部ポップアップを Qt::Popup ウィンドウ（キーボードグラブ）
+    として表示するため、QLineEdit へのキーイベントが届かなくなる。
+    これを根本解決するために、以下を組み合わせたカスタムポップアップを使う:
+      - Qt::Tool | Qt::FramelessWindowHint  : フレームなしの軽量ウィンドウ
+      - WA_ShowWithoutActivating            : 表示してもアクティブウィンドウを変えない
+      - FocusPolicy.NoFocus                 : クリックしてもフォーカスが移動しない
+    これにより QLineEdit が常にフォーカスを保持し、キー入力・IME が正常に機能する。
+    """
+
+    item_chosen = Signal(str)
+
+    def __init__(self, anchor: "QLineEdit") -> None:
+        # anchor のトップレベルウィンドウを親にする
+        # → メインウィンドウと一緒に最小化・アクティブ切り替えが連動する
+        parent_win = anchor.window()
+        super().__init__(parent_win if parent_win is not None else anchor)
+        self.setWindowFlags(
+            Qt.WindowType.Tool
+            | Qt.WindowType.FramelessWindowHint
+        )
+        self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating)
+        self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.setObjectName("completionPopup")
+        self._anchor = anchor
+        self.itemClicked.connect(lambda item: self.item_chosen.emit(item.text()))
+
+    def set_items(self, items: list[str]) -> None:
+        self.clear()
+        for text in items:
+            self.addItem(text)
+        self.setCurrentRow(-1)  # 初期状態は未選択
+
+    def navigate(self, delta: int) -> None:
+        """
+        delta=+1 で下へ、-1 で上へ移動する。
+        先頭より上に行くと選択解除（入力テキストに戻る）。
+        末尾より下には行かない。
+        """
+        n = self.count()
+        if n == 0:
+            return
+        cur = self.currentRow()
+        if cur < 0:
+            self.setCurrentRow(0 if delta > 0 else n - 1)
+        else:
+            new_row = cur + delta
+            if new_row < 0:
+                self.setCurrentRow(-1)  # 選択解除
+            elif new_row >= n:
+                self.setCurrentRow(n - 1)
+            else:
+                self.setCurrentRow(new_row)
+
+    def current_text(self) -> str | None:
+        item = self.currentItem()
+        return item.text() if item else None
+
+    def reposition(self) -> None:
+        """アンカーウィジェット（QLineEdit）の直下に位置を合わせる。"""
+        anchor = self._anchor
+        pos = anchor.mapToGlobal(QPoint(0, anchor.height()))
+        row_h = self.sizeHintForRow(0) if self.count() > 0 else 24
+        h = min(row_h * self.count() + 4, 200)
+        self.setGeometry(pos.x(), pos.y(), anchor.width(), h)
+
+    def show_popup(self) -> None:
+        self.reposition()
+        self.show()
+        self.raise_()
+
+
+class _TagLineEdit(QLineEdit):
+    """
+    カスタム補完ポップアップ付き QLineEdit。
+
+    QCompleter を使わず自前で補完ポップアップを管理することで、
+    Windows IME 環境でのフォーカス奪取・キーナビゲーション不具合を根本解決する。
+
+    動作フロー:
+    - 文字入力 (ASCII)     : keyPressEvent → super() → _update_popup()
+    - IME プリエディット   : inputMethodEvent → super() → _update_popup(preedit)
+    - IME 確定             : inputMethodEvent → super() (text 更新) → _update_popup("")
+    - ↓/↑ キー            : popup.navigate() を直接呼び出し (super 呼ばず)
+    - Enter (候補選択中)   : suggestion_confirmed を emit して確定
+    - Enter (候補未選択)   : popup を閉じて returnPressed を発火させる
+    - Escape               : popup を閉じる
+    """
+
+    suggestion_confirmed = Signal(str)  # ユーザーが補完候補を選択確定したとき
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self._all_tags: list[str] = []
+        self._popup: _CompletionPopup | None = None
+
+    def set_all_tags(self, tags: list[str]) -> None:
+        self._all_tags = tags
+
+    def _ensure_popup(self) -> _CompletionPopup:
+        if self._popup is None:
+            self._popup = _CompletionPopup(self)
+            self._popup.item_chosen.connect(self._on_item_clicked)
+        return self._popup
+
+    def _on_item_clicked(self, text: str) -> None:
+        """ポップアップのアイテムをマウスクリックで選択したとき。"""
+        self._ensure_popup().hide()
+        self.clear()
+        self.suggestion_confirmed.emit(text)
+
+    def _update_popup(self, extra_preedit: str = "") -> None:
+        """
+        現在の入力テキスト + IME プリエディットを合わせてポップアップを更新する。
+        extra_preedit は inputMethodEvent から渡される現在のプリエディット文字列。
+        """
+        raw = (self.text() + extra_preedit).strip()
+        query = raw.lower()
+
+        if not query:
+            if self._popup:
+                self._popup.hide()
+            return
+
+        matches = [t for t in self._all_tags if query in t.lower()][:_MAX_SUGGESTIONS]
+        if not matches:
+            if self._popup:
+                self._popup.hide()
+            return
+
+        popup = self._ensure_popup()
+        popup.set_items(matches)
+        popup.show_popup()
+
+    def keyPressEvent(self, event: QKeyEvent) -> None:
+        popup = self._popup
+        key = event.key()
+
+        if popup and popup.isVisible():
+            if key == Qt.Key.Key_Down:
+                popup.navigate(+1)
+                return
+            elif key == Qt.Key.Key_Up:
+                popup.navigate(-1)
+                return
+            elif key in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
+                chosen = popup.current_text()
+                if chosen is not None:
+                    # 候補が選択されている → 確定して終了
+                    popup.hide()
+                    self.clear()
+                    self.suggestion_confirmed.emit(chosen)
+                    return
+                # 候補未選択 → ポップアップだけ閉じて returnPressed を発火させる
+                popup.hide()
+                # fall through → super() が returnPressed を発火
+            elif key == Qt.Key.Key_Escape:
+                popup.hide()
+                return
+
+        super().keyPressEvent(event)
+        # キー処理後にポップアップを更新する。
+        # Enter の場合は _on_return がここより先に実行されて self.clear() 済みなので
+        # _update_popup() は空テキストを受け取りポップアップを閉じる。
+        self._update_popup()
+
+    def inputMethodEvent(self, event: QInputMethodEvent) -> None:
+        super().inputMethodEvent(event)
+        # IME プリエディット中もポップアップを更新する。
+        # super() 呼び出し後、self.text() は確定済みテキストのみを含む。
+        # event.preeditString() が現在のプリエディット文字列。
+        self._update_popup(extra_preedit=event.preeditString())
+
+    def focusOutEvent(self, event) -> None:
+        super().focusOutEvent(event)
+        # フォーカスが外れたらポップアップを閉じる。
+        # _CompletionPopup は NoFocus なのでポップアップクリックではここは呼ばれない。
+        if self._popup:
+            self._popup.hide()
+
+    def hideEvent(self, event) -> None:
+        super().hideEvent(event)
+        if self._popup:
+            self._popup.hide()
+
+    def moveEvent(self, event) -> None:
+        super().moveEvent(event)
+        if self._popup and self._popup.isVisible():
+            self._popup.reposition()
+
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        if self._popup and self._popup.isVisible():
+            self._popup.reposition()
 
 
 class _ChipContainer(QWidget):
@@ -116,7 +319,6 @@ class TagInputWidget(QWidget):
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self._tags: list[str] = []
-        self._all_tags: list[str] = []
         self._color_map: dict[str, str | None] = {}
 
         outer = QVBoxLayout(self)
@@ -126,16 +328,11 @@ class TagInputWidget(QWidget):
         # Chip container (manual flow layout via resizeEvent)
         self._chip_container = _ChipContainer()
 
-        # Input
-        self._input = QLineEdit()
+        # Input (_TagLineEdit が補完ポップアップを自己管理する。QCompleter は使わない)
+        self._input = _TagLineEdit()
         self._input.setPlaceholderText("タグを入力して Enter…")
         self._input.returnPressed.connect(self._on_return)
-
-        self._completer = QCompleter(self._all_tags)
-        self._completer.setCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
-        self._completer.setFilterMode(Qt.MatchFlag.MatchContains)
-        self._input.setCompleter(self._completer)
-        self._completer.activated.connect(self._on_completed)
+        self._input.suggestion_confirmed.connect(self._on_suggestion_confirmed)
 
         outer.addWidget(self._chip_container)
         outer.addWidget(self._input)
@@ -145,8 +342,7 @@ class TagInputWidget(QWidget):
     # ------------------------------------------------------------------
 
     def set_completion_list(self, tags: list[str]) -> None:
-        self._all_tags = tags
-        self._completer.model().setStringList(tags)  # type: ignore[union-attr]
+        self._input.set_all_tags(tags)
 
     def set_color_map(self, color_map: dict[str, str | None]) -> None:
         """タグ名 → カラーの対応表を設定し、チップを再描画する。"""
@@ -165,15 +361,7 @@ class TagInputWidget(QWidget):
     # ------------------------------------------------------------------
 
     def _on_return(self) -> None:
-        popup = self._completer.popup()
-        if popup.isVisible():
-            # 矢印キーでいずれかの候補が選択されている場合は
-            # activated シグナル (_on_completed) に処理を任せる
-            if popup.currentIndex().row() >= 0:
-                return
-            # 候補が選択されていない（矢印未操作）場合は
-            # ポップアップを閉じて入力テキストをそのまま追加する
-            popup.hide()
+        """Enter キー（補完候補未選択）でテキストをそのままタグとして追加する。"""
         text = self._input.text().strip().lower()
         if text and text not in self._tags:
             self._tags.append(text)
@@ -182,17 +370,15 @@ class TagInputWidget(QWidget):
             self.tag_added.emit(text)
         self._input.clear()
 
-    def _on_completed(self, text: str) -> None:
-        """コンプリーターのポップアップから選択されたときに呼ばれる。"""
-        from PySide6.QtCore import QTimer
+    def _on_suggestion_confirmed(self, text: str) -> None:
+        """補完ポップアップから候補が確定されたときに呼ばれる。"""
         text = text.strip().lower()
         if text and text not in self._tags:
             self._tags.append(text)
             self._rebuild_chips()
             self.tags_changed.emit(self._tags)
             self.tag_added.emit(text)
-        # コンプリーターがテキストを再セットした後でクリアするため singleShot で遅延
-        QTimer.singleShot(0, self._input.clear)
+        # _TagLineEdit 側で clear() 済み
 
     def _rebuild_chips(self) -> None:
         chips = []
