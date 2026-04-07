@@ -164,25 +164,13 @@ class _TagLineEdit(QLineEdit):
         QTimer.singleShot(0, lambda: self._update_popup(preedit))
 
     def focusInEvent(self, event: QFocusEvent) -> None:
-        # Qt の QLineEdit::focusInEvent は ActiveWindowFocusReason 時に selectAll()
-        # を呼び出す (Windows の selectOnKeyboardFocusIn 由来)。
-        # ポップアップ show() に伴うウィンドウアクティブ化サイクルや
-        # IME 切り替え時の WM_SETFOCUS でこれが発火されると、
-        # selectAll() → 次のキー入力が既存文字を上書きして最初の1文字が消える。
-        # 修正方針: Tab/Backtab 以外のフォーカスイベントは OtherFocusReason に差し替えて
-        # super() に渡すことで、selectAll() 自体を呼び出させない。
-        # (selectAll 後に deselect する方式は間に別イベントが割り込む危険がある)
-        if event.reason() in (
-            Qt.FocusReason.TabFocusReason,
-            Qt.FocusReason.BacktabFocusReason,
-        ):
-            super().focusInEvent(event)
-        else:
-            # ActiveWindowFocusReason / OtherFocusReason / MouseFocusReason すべて
-            # OtherFocusReason として super() に渡すことで
-            # Qt の 「selectAll on active-window-focus」 を完全に無効化する。
-            neutral = QFocusEvent(QEvent.Type.FocusIn, Qt.FocusReason.OtherFocusReason)
-            super().focusInEvent(neutral)
+        # Qt の QLineEdit::focusInEvent は TabFocusReason / ActiveWindowFocusReason 時に
+        # selectAll() を呼び出す。タグ入力欄では既存テキストを全選択する必要がない
+        # (全選択中に IME commitString が来ると既存テキストが消える)。
+        # すべてのフォーカスイベントを OtherFocusReason に差し替えて super() に渡すことで
+        # selectAll() 自体を呼び出させない。
+        neutral = QFocusEvent(QEvent.Type.FocusIn, Qt.FocusReason.OtherFocusReason)
+        super().focusInEvent(neutral)
 
     def keyPressEvent(self, event: QKeyEvent) -> None:
         popup = self._popup
@@ -234,6 +222,12 @@ class _TagLineEdit(QLineEdit):
     def inputMethodEvent(self, event: QInputMethodEvent) -> None:
         # preedit を先にキャプチャ (super() 後は変わる可能性があるため)
         preedit = event.preeditString()
+        # 安全網: 全選択状態で commitString または preedit が来た場合、
+        # super() 内部 (QWidgetLineControl) が選択テキストを削除してから挿入するため
+        # 既存テキストが消える。super() の前に必ず deselect して防ぐ。
+        if self.hasSelectedText():
+            self.deselect()
+            self.setCursorPosition(len(self.text()))
         super().inputMethodEvent(event)
         # IME プリエディット中もポップアップを遅延更新する。
         # super() 呼び出し後、self.text() は確定済みテキストのみを含む。
