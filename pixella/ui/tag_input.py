@@ -1,12 +1,12 @@
 """Tag input widget with autocomplete."""
 from __future__ import annotations
 
-from PySide6.QtCore import Qt, QPoint, Signal
+from PySide6.QtCore import Qt, QEvent, QPoint, QTimer, Signal
 from PySide6.QtWidgets import (
     QHBoxLayout, QLabel, QLineEdit, QListWidget,
     QSizePolicy, QVBoxLayout, QWidget,
 )
-from PySide6.QtGui import QKeyEvent, QInputMethodEvent
+from PySide6.QtGui import QFocusEvent, QInputMethodEvent, QKeyEvent
 
 
 _MAX_SUGGESTIONS = 50  # 表示する候補数の上限
@@ -35,6 +35,7 @@ class _CompletionPopup(QListWidget):
         self.setWindowFlags(
             Qt.WindowType.Tool
             | Qt.WindowType.FramelessWindowHint
+            | Qt.WindowType.WindowDoesNotAcceptFocus  # WS_EX_NOACTIVATE: 表示時にメインウィンドウを非アクティブにしない
         )
         self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating)
@@ -150,6 +151,39 @@ class _TagLineEdit(QLineEdit):
         popup.set_items(matches)
         popup.show_popup()
 
+    def _schedule_update_popup(self, preedit: str = "") -> None:
+        """
+        ポップアップ更新を次のイベントループ処理まで遅延させる。
+
+        _update_popup() を keyPressEvent / inputMethodEvent の中で直接呼ぶと、
+        popup.show_popup() が QWidget::show() を経由して Windows メッセージポンプを
+        駆動し、フォーカス切り替えイベントが再入してくる場合がある。
+        QTimer.singleShot(0) で遅延することで、呼び出し元のイベントハンドラが
+        完全に返った後にポップアップ更新が実行されるよう保証する。
+        """
+        QTimer.singleShot(0, lambda: self._update_popup(preedit))
+
+    def focusInEvent(self, event: QFocusEvent) -> None:
+        # Qt の QLineEdit::focusInEvent は ActiveWindowFocusReason 時に selectAll()
+        # を呼び出す (Windows の selectOnKeyboardFocusIn 由来)。
+        # ポップアップ show() に伴うウィンドウアクティブ化サイクルや
+        # IME 切り替え時の WM_SETFOCUS でこれが発火されると、
+        # selectAll() → 次のキー入力が既存文字を上書きして最初の1文字が消える。
+        # 修正方針: Tab/Backtab 以外のフォーカスイベントは OtherFocusReason に差し替えて
+        # super() に渡すことで、selectAll() 自体を呼び出させない。
+        # (selectAll 後に deselect する方式は間に別イベントが割り込む危険がある)
+        if event.reason() in (
+            Qt.FocusReason.TabFocusReason,
+            Qt.FocusReason.BacktabFocusReason,
+        ):
+            super().focusInEvent(event)
+        else:
+            # ActiveWindowFocusReason / OtherFocusReason / MouseFocusReason すべて
+            # OtherFocusReason として super() に渡すことで
+            # Qt の 「selectAll on active-window-focus」 を完全に無効化する。
+            neutral = QFocusEvent(QEvent.Type.FocusIn, Qt.FocusReason.OtherFocusReason)
+            super().focusInEvent(neutral)
+
     def keyPressEvent(self, event: QKeyEvent) -> None:
         popup = self._popup
         key = event.key()
@@ -176,18 +210,35 @@ class _TagLineEdit(QLineEdit):
                 popup.hide()
                 return
 
+        # 安全網: 不準な selectAll() が呼ばれていた場合の保存処理。
+        # 全テキストが選択された状態で印字可能キーが押されたら、
+        # テキストを置換する代わりにカーソルを末尾に移動して追記する。
+        if (
+            self.hasSelectedText()
+            and event.text()
+            and self.selectedText() == self.text()
+            and not (event.modifiers() & (
+                Qt.KeyboardModifier.ControlModifier
+                | Qt.KeyboardModifier.AltModifier
+            ))
+        ):
+            self.deselect()
+            self.setCursorPosition(len(self.text()))
+
         super().keyPressEvent(event)
-        # キー処理後にポップアップを更新する。
-        # Enter の場合は _on_return がここより先に実行されて self.clear() 済みなので
-        # _update_popup() は空テキストを受け取りポップアップを閉じる。
-        self._update_popup()
+        # キー処理後にポップアップを遅延更新する。
+        # 次のイベントループまで遅延させることで、super() 内部での
+        # Windows メッセージポンプ駆動によるフォーカス再入を回避する。
+        self._schedule_update_popup()
 
     def inputMethodEvent(self, event: QInputMethodEvent) -> None:
+        # preedit を先にキャプチャ (super() 後は変わる可能性があるため)
+        preedit = event.preeditString()
         super().inputMethodEvent(event)
-        # IME プリエディット中もポップアップを更新する。
+        # IME プリエディット中もポップアップを遅延更新する。
         # super() 呼び出し後、self.text() は確定済みテキストのみを含む。
-        # event.preeditString() が現在のプリエディット文字列。
-        self._update_popup(extra_preedit=event.preeditString())
+        # preedit を lambda でキャプチャして正しい文字列を渡す。
+        self._schedule_update_popup(preedit)
 
     def focusOutEvent(self, event) -> None:
         super().focusOutEvent(event)
