@@ -112,6 +112,13 @@ class _TagLineEdit(QLineEdit):
         super().__init__(parent)
         self._all_tags: list[str] = []
         self._popup: _CompletionPopup | None = None
+        # 確定済みテキストが変化したときにポップアップを更新する。
+        # keyPressEvent 末尾で無条件に呼ぶ方式だと、F10 および矢印キーのように
+        # event.text()=='' かつ self.text()=='' (プリエディット中) のキーで
+        # _update_popup('') が呼ばれてポップアップを間違えて閉じてしまう。
+        # textEdited はユーザー操作でテキストが実際に変化したときのみ発火するため、
+        # 不要な隅間が生じない。
+        self.textEdited.connect(lambda _: self._schedule_update_popup())
 
     def set_all_tags(self, tags: list[str]) -> None:
         self._all_tags = tags
@@ -148,7 +155,12 @@ class _TagLineEdit(QLineEdit):
             return
 
         popup = self._ensure_popup()
+        # 上下キーナビゲート中に inputMethodEvent などから再呼び出しがあっても
+        # 現在の選択をリセットしないよう、選択済みアイテムを保持する。
+        prev_selected = popup.current_text()
         popup.set_items(matches)
+        if prev_selected is not None and prev_selected in matches:
+            popup.setCurrentRow(matches.index(prev_selected))
         popup.show_popup()
 
     def _schedule_update_popup(self, preedit: str = "") -> None:
@@ -214,10 +226,10 @@ class _TagLineEdit(QLineEdit):
             self.setCursorPosition(len(self.text()))
 
         super().keyPressEvent(event)
-        # キー処理後にポップアップを遅延更新する。
-        # 次のイベントループまで遅延させることで、super() 内部での
-        # Windows メッセージポンプ駆動によるフォーカス再入を回避する。
-        self._schedule_update_popup()
+        # ポップアップ更新は textEdited シグナル経由で行うため、ここでは呼ばない。
+        # keyPressEvent でテキストを変化させないキー (F10・矢印等) の場合に
+        # _schedule_update_popup('') を呼ぶと、preedit 中 (self.text()=='') に
+        # popup.hide() が実行されてポップアップが誤って消えてしまう。
 
     def inputMethodEvent(self, event: QInputMethodEvent) -> None:
         # preedit を先にキャプチャ (super() 後は変わる可能性があるため)
