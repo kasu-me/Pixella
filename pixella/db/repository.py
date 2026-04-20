@@ -347,6 +347,140 @@ def remove_image_from_group(session: Session, image: Image) -> None:
     session.flush()
 
 
+def merge_groups(
+    session: Session,
+    name: str,
+    group_ids: list[int],
+    image_ids: list[int],
+) -> Group:
+    """指定されたグループと画像を1つの新しいグループにまとめる。
+
+    【重要】`img.group_id = x`（カラム直接代入）ではなく `img.group = new_group`
+    （リレーションシップ属性）を使う。カラム直接代入では SQLAlchemy の双方向
+    コレクション（grp.images）が更新されないため、session.delete(grp) 時に
+    SQLAlchemy が「まだ子が残っている」と判断して DELETE 前に自動的に
+    `UPDATE images SET group_id = NULL` を発行してしまう。
+
+    処理順序:
+      1. ソースグループ・追加画像を selectinload でロード
+      2. タグ ID をスナップショットとして収集
+      3. 新グループ INSERT → flush（ID確定）
+      4. ソースグループの cover_image_id を NULL → flush
+         （Group→Image の SET NULL FK を先にクリア）
+      5. 各画像の個別タグをクリア、img.group = new_group で移動
+         → back_populates により grp.images から自動削除される
+      6. flush（UPDATE images.group_id + DELETE image_tag を確定）
+      7. ソースグループのタグをクリア → flush（DELETE group_tag を確定）
+      8. ソースグループを DELETE → flush
+         （grp.images は空なので自動 SET NULL は発火しない）
+      9. タグを DB から再ロードして新グループに設定
+     10. カバー画像を設定 → flush
+    """
+    # ---- フェーズ1: ロード ----
+    source_groups: list[Group] = []
+    if group_ids:
+        source_groups = list(
+            session.execute(
+                select(Group)
+                .where(Group.id.in_(group_ids))
+                .options(
+                    selectinload(Group.images).selectinload(Image.tags),
+                    selectinload(Group.tags),
+                )
+            ).scalars().all()
+        )
+
+    extra_images: list[Image] = []
+    if image_ids:
+        extra_images = list(
+            session.execute(
+                select(Image)
+                .where(Image.id.in_(image_ids))
+                .options(selectinload(Image.tags))
+            ).scalars().all()
+        )
+
+    # ---- フェーズ2: タグ ID をスナップショット収集 ----
+    # オブジェクト参照ではなく ID のみ保持（削除後の再ロードに備える）
+    seen_tag_ids: set[int] = set()
+    ordered_tag_ids: list[int] = []
+
+    for grp in source_groups:
+        for tag in grp.tags:
+            if tag.id not in seen_tag_ids:
+                seen_tag_ids.add(tag.id)
+                ordered_tag_ids.append(tag.id)
+        for img in grp.images:
+            for tag in img.tags:
+                if tag.id not in seen_tag_ids:
+                    seen_tag_ids.add(tag.id)
+                    ordered_tag_ids.append(tag.id)
+    for img in extra_images:
+        for tag in img.tags:
+            if tag.id not in seen_tag_ids:
+                seen_tag_ids.add(tag.id)
+                ordered_tag_ids.append(tag.id)
+
+    # 移動対象の全画像をリストにスナップショット（コレクション変更前に確定）
+    all_images_to_move: list[Image] = (
+        [img for grp in source_groups for img in list(grp.images)]
+        + list(extra_images)
+    )
+
+    # ---- フェーズ3: 新グループ作成 ----
+    new_group = Group(name=name)
+    session.add(new_group)
+    session.flush()  # new_group.id を確定
+
+    # ---- フェーズ4: cover_image_id を先にクリア ----
+    # Group.cover_image_id も ondelete="SET NULL" なので、
+    # DELETE 前にクリアして FK 整合性エラーを防ぐ
+    for grp in source_groups:
+        grp.cover_image_id = None
+    session.flush()
+
+    # ---- フェーズ5: 画像を新グループへ移動 ----
+    # img.group = new_group（リレーションシップ属性）を使うことで
+    # back_populates により grp.images からも自動削除される。
+    # これにより session.delete(grp) 時の自動 SET NULL 発行を防ぐ。
+    for img in all_images_to_move:
+        img.tags.clear()       # 個別タグをグループタグに集約
+        img.group = new_group  # ← カラム直接代入ではなくリレーションシップで移動
+
+    # ---- フェーズ6: UPDATE images.group_id + DELETE image_tag を確定 ----
+    session.flush()
+
+    # ---- フェーズ7: ソースグループのタグをクリア → DELETE group_tag を確定 ----
+    for grp in source_groups:
+        grp.tags.clear()
+    session.flush()
+
+    # ---- フェーズ8: ソースグループを DELETE ----
+    # grp.images はフェーズ5で空になっているため、
+    # SQLAlchemy による自動 `UPDATE images SET group_id = NULL` は発行されない
+    for grp in source_groups:
+        session.delete(grp)
+    session.flush()
+
+    # ---- フェーズ9: タグを DB から再ロードして新グループに設定 ----
+    # 削除後に再ロードすることで、削除済みグループとの ORM 関連が残らない
+    if ordered_tag_ids:
+        tag_map = {
+            t.id: t
+            for t in session.execute(
+                select(Tag).where(Tag.id.in_(ordered_tag_ids))
+            ).scalars().all()
+        }
+        new_group.tags = [tag_map[tid] for tid in ordered_tag_ids if tid in tag_map]
+
+    # ---- フェーズ10: カバー画像を設定 ----
+    if all_images_to_move:
+        new_group.cover_image_id = all_images_to_move[0].id
+
+    session.flush()
+    return new_group
+
+
 def set_group_cover(session: Session, group: Group, image: Image) -> None:
     group.cover_image_id = image.id
     session.flush()

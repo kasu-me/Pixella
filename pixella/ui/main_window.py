@@ -16,7 +16,7 @@ from pixella import __app_name__, __version__
 from pixella.core import ThumbnailCache, ThumbnailWorkerPool, THUMB_DIR, SUPPORTED_EXTS
 from pixella.db import (
     get_session, all_images, all_groups, all_tag_names, all_tag_color_map,
-    add_images, images_without_tags, groups_without_tags, create_group, rename_group, dissolve_group,
+    add_images, images_without_tags, groups_without_tags, create_group, merge_groups, rename_group, dissolve_group,
     remove_image_from_group, set_image_tags, set_group_tags,
     export_json, import_json, bulk_apply_tag_delta, bulk_apply_group_tag_delta,
 )
@@ -118,6 +118,12 @@ class MainWindow(QMainWindow):
         self._act_group.setEnabled(False)
         self._act_group.triggered.connect(self._create_group)
         toolbar.addAction(self._act_group)
+
+        self._act_merge = QAction("⊞ グループ結合", self)
+        self._act_merge.setShortcut(QKeySequence("Ctrl+M"))
+        self._act_merge.setEnabled(False)
+        self._act_merge.triggered.connect(self._merge_groups)
+        toolbar.addAction(self._act_merge)
 
         self._act_dissolve = QAction("グループ解除", self)
         self._act_dissolve.setEnabled(False)
@@ -360,6 +366,28 @@ class MainWindow(QMainWindow):
             session.commit()
         self._refresh_current_view()
 
+    def _merge_groups(self) -> None:
+        selected = self._grid.selected_items_data()
+        groups = [s for s in selected if isinstance(s, Group)]
+        images = [s for s in selected if isinstance(s, Image)]
+        if not groups:
+            return
+        # メンバー一覧をダイアログに表示（グループ名＋画像ファイル名）
+        member_names = [f"⊞ {g.name}" for g in groups] + [img.filename for img in images]
+        dlg = GroupDialog(member_names, parent=self)
+        dlg.setWindowTitle("グループ結合")
+        if dlg.exec() != GroupDialog.DialogCode.Accepted:
+            return
+        with get_session() as session:
+            merge_groups(
+                session,
+                dlg.group_name,
+                [g.id for g in groups],
+                [img.id for img in images],
+            )
+            session.commit()
+        self._refresh_current_view()
+
     def _dissolve_group(self) -> None:
         selected = self._grid.selected_items_data()
         groups = [s for s in selected if isinstance(s, Group)]
@@ -459,10 +487,15 @@ class MainWindow(QMainWindow):
     def _on_selection_changed(self, items: list) -> None:
         has_images  = any(isinstance(i, Image) for i in items)
         has_groups  = any(isinstance(i, Group) for i in items)
-        multi_img   = sum(1 for i in items if isinstance(i, Image)) >= 2
+        num_images  = sum(1 for i in items if isinstance(i, Image))
+        num_groups  = sum(1 for i in items if isinstance(i, Group))
+        multi_img   = num_images >= 2
 
-        # グループ化は複数画像が選択されている場合のみ有効
-        self._act_group.setEnabled(multi_img)
+        # グループ化: 画像のみ2枚以上選択（グループなし）
+        self._act_group.setEnabled(multi_img and not has_groups)
+        # グループ結合: グループを含み、合計2アイテム以上
+        can_merge = has_groups and (num_groups + num_images >= 2)
+        self._act_merge.setEnabled(can_merge)
         self._act_dissolve.setEnabled(has_groups)
         self._act_remove.setEnabled(bool(items))
 
