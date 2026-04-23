@@ -19,6 +19,7 @@ from pixella.db import (
     add_images, images_without_tags, groups_without_tags, create_group, merge_groups, rename_group, dissolve_group,
     remove_image_from_group, set_image_tags, set_group_tags,
     export_json, import_json, bulk_apply_tag_delta, bulk_apply_group_tag_delta,
+    cleanup_uncolored_orphan_tags,
 )
 from pixella.db.models import Image, Group, Tag
 from sqlalchemy import select
@@ -45,6 +46,7 @@ class MainWindow(QMainWindow):
         self._cached_images: list = []   # DB再クエリなしでソート変更を可能にするキャッシュ
         self._cached_groups: list = []
         self._group_windows: dict[int, GroupWindow] = {}  # group.id -> GroupWindow
+        self._tag_clipboard: list[str] = []  # タグコピー用クリップボード
         # 現在のトップレベルビュー状態
         self._view_mode: str = "home"
         self._view_search_tags: list[str] = []
@@ -185,6 +187,8 @@ class MainWindow(QMainWindow):
         self._detail.open_group.connect(self._open_group_window)
         self._detail.remove_from_group.connect(self._on_remove_from_group)
         self._detail.group_renamed.connect(self._on_group_renamed)
+        self._detail.tags_copy_requested.connect(self._on_tags_copy)
+        self._detail.tags_paste_requested.connect(self._on_tags_paste)
 
         splitter.addWidget(self._grid)
         splitter.addWidget(self._detail)
@@ -552,6 +556,7 @@ class MainWindow(QMainWindow):
         if len(selected) != 1:
             return  # 選択状態が変わっていたら無視
         item = selected[0]
+        removed: set[str] = set()
         with get_session() as session:
             if isinstance(item, Image):
                 fresh = session.execute(
@@ -559,6 +564,7 @@ class MainWindow(QMainWindow):
                     .options(selectinload(Image.tags))
                 ).scalar_one_or_none()
                 if fresh:
+                    removed = {t.name for t in fresh.tags} - {n.strip().lower() for n in tags if n.strip()}
                     set_image_tags(session, fresh, tags)
             else:
                 fresh = session.execute(
@@ -566,7 +572,10 @@ class MainWindow(QMainWindow):
                     .options(selectinload(Group.tags))
                 ).scalar_one_or_none()
                 if fresh:
+                    removed = {t.name for t in fresh.tags} - {n.strip().lower() for n in tags if n.strip()}
                     set_group_tags(session, fresh, tags)
+            if fresh and removed:
+                cleanup_uncolored_orphan_tags(session, list(removed))
             session.commit()
             # チップをセッション内でまとめて更新（detach 前に色情報を取得）
             if fresh:
@@ -606,7 +615,10 @@ class MainWindow(QMainWindow):
         bulk_apply_tag_delta(image_ids, added=set(), removed={tag})
         bulk_apply_group_tag_delta(group_ids, added=set(), removed={tag})
         with get_session() as session:
-            all_t = all_tag_names(session)
+            # タグが孤立して無色なら自動削除（bulk_apply 後に実施）
+            cleanup_uncolored_orphan_tags(session, [tag])
+            session.commit()
+            all_t = all_tag_names(session)  # cleanup 後に取得
             if image_ids:
                 for img in session.execute(
                     select(Image).where(Image.id.in_(image_ids))
@@ -659,6 +671,93 @@ class MainWindow(QMainWindow):
         # グループウィンドウのタイトルも更新
         if group.id in self._group_windows:
             self._group_windows[group.id].setWindowTitle(f"⊞ {new_name}")
+
+    # ------------------------------------------------------------------
+    # Tag copy / paste
+    # ------------------------------------------------------------------
+
+    def _on_tags_copy(self) -> None:
+        """現在選択中のアイテムのタグをクリップボードに保存する。"""
+        selected = self._grid.selected_items_data()
+        if not selected:
+            return
+        # 単一選択はそのタグ、複数選択は共通タグをコピー
+        if len(selected) == 1:
+            item = selected[0]
+            with get_session() as session:
+                if isinstance(item, Image):
+                    fresh = session.execute(
+                        select(Image).where(Image.id == item.id)
+                        .options(selectinload(Image.tags))
+                    ).scalar_one_or_none()
+                else:
+                    fresh = session.execute(
+                        select(Group).where(Group.id == item.id)
+                        .options(selectinload(Group.tags))
+                    ).scalar_one_or_none()
+                self._tag_clipboard = [t.name for t in fresh.tags] if fresh else []
+        else:
+            # 複数選択: 全アイテムの共通タグをコピー
+            item_ids_images = [i.id for i in selected if isinstance(i, Image)]
+            item_ids_groups = [i.id for i in selected if isinstance(i, Group)]
+            with get_session() as session:
+                all_items = []
+                if item_ids_images:
+                    all_items += list(session.execute(
+                        select(Image).where(Image.id.in_(item_ids_images))
+                        .options(selectinload(Image.tags))
+                    ).scalars())
+                if item_ids_groups:
+                    all_items += list(session.execute(
+                        select(Group).where(Group.id.in_(item_ids_groups))
+                        .options(selectinload(Group.tags))
+                    ).scalars())
+                if all_items:
+                    common = set(t.name for t in all_items[0].tags)
+                    for it in all_items[1:]:
+                        common &= {t.name for t in it.tags}
+                    self._tag_clipboard = sorted(common)
+                else:
+                    self._tag_clipboard = []
+        self._detail.set_clipboard_available(bool(self._tag_clipboard))
+        count = len(self._tag_clipboard)
+        self._status_label.setText(
+            f"タグ {count} 件をコピーしました: {', '.join(self._tag_clipboard)}"
+            if count else "コピーするタグがありません"
+        )
+
+    def _on_tags_paste(self) -> None:
+        """クリップボードのタグを現在の選択に追加する。"""
+        if not self._tag_clipboard:
+            return
+        selected = self._grid.selected_items_data()
+        if not selected:
+            return
+        image_ids = [i.id for i in selected if isinstance(i, Image)]
+        group_ids = [i.id for i in selected if isinstance(i, Group)]
+        bulk_apply_tag_delta(image_ids, added=set(self._tag_clipboard), removed=set())
+        bulk_apply_group_tag_delta(group_ids, added=set(self._tag_clipboard), removed=set())
+        with get_session() as session:
+            all_t = all_tag_names(session)
+            cmap = all_tag_color_map(session)
+            if image_ids:
+                for img in session.execute(
+                    select(Image).where(Image.id.in_(image_ids))
+                    .options(selectinload(Image.tags))
+                ).scalars():
+                    self._grid.set_item_tags(img)
+            if group_ids:
+                for grp in session.execute(
+                    select(Group).where(Group.id.in_(group_ids))
+                    .options(selectinload(Group.tags))
+                ).scalars():
+                    self._grid.set_item_tags(grp)
+        self._detail.set_completion_list(all_t)
+        self._detail.set_color_map(cmap)
+        self._search_bar.set_completion_list(all_t)
+        # 詳細パネルを再表示
+        self._on_selection_changed(selected)
+        self._status_label.setText(f"タグ {len(self._tag_clipboard)} 件を貼り付けました")
 
     # ------------------------------------------------------------------
     # Search

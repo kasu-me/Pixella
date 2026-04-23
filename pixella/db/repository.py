@@ -77,6 +77,34 @@ def delete_tag(session: Session, tag_id: int) -> None:
         session.flush()
 
 
+def cleanup_uncolored_orphan_tags(session: Session, tag_names: list[str]) -> None:
+    """指定タグのうち、使用数が 0 かつ色未設定のタグを削除する。
+
+    画像/グループからタグを外した後に呼び出すことで、孤立した無色タグを自動削除する。
+    色が設定されているタグは意図的に管理されているとみなして保持する。
+    """
+    from sqlalchemy import func
+    from .models import image_tag_table, group_tag_table
+
+    for name in tag_names:
+        tag = session.execute(
+            select(Tag).where(Tag.name == name.strip().lower())
+        ).scalar_one_or_none()
+        if tag is None or tag.color is not None:
+            continue
+        img_cnt = session.execute(
+            select(func.count()).select_from(image_tag_table)
+            .where(image_tag_table.c.tag_id == tag.id)
+        ).scalar() or 0
+        grp_cnt = session.execute(
+            select(func.count()).select_from(group_tag_table)
+            .where(group_tag_table.c.tag_id == tag.id)
+        ).scalar() or 0
+        if img_cnt + grp_cnt == 0:
+            session.delete(tag)
+    session.flush()
+
+
 # ---------------------------------------------------------------------------
 # Image CRUD
 # ---------------------------------------------------------------------------

@@ -29,6 +29,8 @@ class DetailPanel(QWidget):
     open_group        = Signal(object)         # Group
     remove_from_group = Signal(object)         # Image
     group_renamed     = Signal(object, str)    # (Group, new_name)
+    tags_copy_requested  = Signal()            # タグをコピーボタン
+    tags_paste_requested = Signal()            # タグを貼り付けボタン
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -61,6 +63,22 @@ class DetailPanel(QWidget):
 
         # Tags section
         layout.addWidget(_SectionTitle("タグ"))
+        # タグ操作ボタンバー（コピー・貼り付け）
+        tag_btn_bar = QWidget()
+        tag_btn_layout = QHBoxLayout(tag_btn_bar)
+        tag_btn_layout.setContentsMargins(0, 0, 0, 0)
+        tag_btn_layout.setSpacing(4)
+        self._btn_copy_tags = QPushButton("タグをコピー")
+        self._btn_copy_tags.setToolTip("選択中のアイテムのタグをコピーします")
+        self._btn_copy_tags.clicked.connect(self.tags_copy_requested)
+        self._btn_paste_tags = QPushButton("タグを貼り付け")
+        self._btn_paste_tags.setToolTip("コピーしたタグを現在の選択に追加します")
+        self._btn_paste_tags.setEnabled(False)
+        self._btn_paste_tags.clicked.connect(self.tags_paste_requested)
+        tag_btn_layout.addWidget(self._btn_copy_tags)
+        tag_btn_layout.addWidget(self._btn_paste_tags)
+        tag_btn_layout.addStretch()
+        layout.addWidget(tag_btn_bar)
         self._tag_input = TagInputWidget()
         self._tag_input.tags_changed.connect(self._on_tags_changed)
         self._tag_input.tag_added.connect(self._on_tag_added)
@@ -116,6 +134,10 @@ class DetailPanel(QWidget):
 
     def set_color_map(self, color_map: dict[str, str | None]) -> None:
         self._tag_input.set_color_map(color_map)
+
+    def set_clipboard_available(self, available: bool) -> None:
+        """タグクリップボードに内容があるかどうかで貼り付けボタンの有効/無効を切り替える。"""
+        self._btn_paste_tags.setEnabled(available)
 
     def show_image(self, image: Image) -> None:
         self._current = image

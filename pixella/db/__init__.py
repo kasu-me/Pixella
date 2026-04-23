@@ -5,6 +5,7 @@ from .repository import (
     create_group, merge_groups, rename_group, dissolve_group, remove_image, remove_image_from_group,
     search_by_tags, set_image_tags, set_group_tags, set_group_cover,
     export_json, import_json, get_or_create_tag, bulk_apply_tag_delta, bulk_apply_group_tag_delta,
+    cleanup_uncolored_orphan_tags,
 )
 
 __all__ = [
@@ -14,4 +15,5 @@ __all__ = [
     "create_group", "merge_groups", "rename_group", "dissolve_group", "remove_image", "remove_image_from_group",
     "search_by_tags", "set_image_tags", "set_group_tags", "set_group_cover",
     "export_json", "import_json", "get_or_create_tag", "bulk_apply_tag_delta", "bulk_apply_group_tag_delta",
+    "cleanup_uncolored_orphan_tags",
 ]

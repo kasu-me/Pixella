@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from PySide6.QtCore import Qt, QEvent, QPoint, QTimer, Signal
 from PySide6.QtWidgets import (
-    QHBoxLayout, QLabel, QLineEdit, QListWidget,
+    QHBoxLayout, QLabel, QLineEdit, QListWidget, QMessageBox,
     QSizePolicy, QVBoxLayout, QWidget,
 )
 from PySide6.QtGui import QFocusEvent, QInputMethodEvent, QKeyEvent
@@ -112,12 +112,12 @@ class _TagLineEdit(QLineEdit):
         super().__init__(parent)
         self._all_tags: list[str] = []
         self._popup: _CompletionPopup | None = None
+        # 現在の IME プリエディット文字列を追跡する。
+        # inputMethodEvent で更新し、Up/Down キー即時表示やフォールバック更新に使用する。
+        self._current_preedit: str = ""
         # 確定済みテキストが変化したときにポップアップを更新する。
-        # keyPressEvent 末尾で無条件に呼ぶ方式だと、F10 および矢印キーのように
-        # event.text()=='' かつ self.text()=='' (プリエディット中) のキーで
-        # _update_popup('') が呼ばれてポップアップを間違えて閉じてしまう。
         # textEdited はユーザー操作でテキストが実際に変化したときのみ発火するため、
-        # 不要な隅間が生じない。
+        # プリエディット中に誤って hide() が呼ばれる問題が起きにくい。
         self.textEdited.connect(lambda _: self._schedule_update_popup())
 
     def set_all_tags(self, tags: list[str]) -> None:
@@ -188,14 +188,26 @@ class _TagLineEdit(QLineEdit):
         popup = self._popup
         key = event.key()
 
+        # ─── Up/Down: ポップアップ即時表示 + ナビゲート ───────────────────────
+        # IME 確定直後など、ポップアップ更新が singleShot で遅延している間に
+        # Up/Down を押すと一瞬ナビゲートできない問題を解消するため、
+        # ポップアップが非表示でもテキスト/プリエディットがあれば即座に表示する。
+        if key in (Qt.Key.Key_Down, Qt.Key.Key_Up):
+            if not popup or not popup.isVisible():
+                raw = (self.text() + self._current_preedit).strip()
+                if raw:
+                    self._update_popup(self._current_preedit)
+                    popup = self._popup
+            if popup and popup.isVisible():
+                popup.navigate(+1 if key == Qt.Key.Key_Down else -1)
+                return
+            # マッチなし / テキスト空 → 通常のカーソル移動に任せる
+            super().keyPressEvent(event)
+            return
+
+        # ─── ポップアップ表示中の Enter / Escape ─────────────────────────────
         if popup and popup.isVisible():
-            if key == Qt.Key.Key_Down:
-                popup.navigate(+1)
-                return
-            elif key == Qt.Key.Key_Up:
-                popup.navigate(-1)
-                return
-            elif key in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
+            if key in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
                 chosen = popup.current_text()
                 if chosen is not None:
                     # 候補が選択されている → 確定して終了
@@ -210,7 +222,7 @@ class _TagLineEdit(QLineEdit):
                 popup.hide()
                 return
 
-        # 安全網: 不準な selectAll() が呼ばれていた場合の保存処理。
+        # 安全網: 不準な selectAll() が呼ばれていた場合の保護処理。
         # 全テキストが選択された状態で印字可能キーが押されたら、
         # テキストを置換する代わりにカーソルを末尾に移動して追記する。
         if (
@@ -226,10 +238,12 @@ class _TagLineEdit(QLineEdit):
             self.setCursorPosition(len(self.text()))
 
         super().keyPressEvent(event)
-        # ポップアップ更新は textEdited シグナル経由で行うため、ここでは呼ばない。
-        # keyPressEvent でテキストを変化させないキー (F10・矢印等) の場合に
-        # _schedule_update_popup('') を呼ぶと、preedit 中 (self.text()=='') に
-        # popup.hide() が実行されてポップアップが誤って消えてしまう。
+
+        # ─── IME 英語モード等で textEdited が発火しない場合のフォールバック ────
+        # event.text() が非空（印字可能文字）かつプリエディット中でなければ
+        # ポップアップ更新をスケジュールする（textEdited との重複は安全）。
+        if event.text() and not self._current_preedit:
+            self._schedule_update_popup()
 
     def inputMethodEvent(self, event: QInputMethodEvent) -> None:
         # preedit を先にキャプチャ (super() 後は変わる可能性があるため)
@@ -241,6 +255,9 @@ class _TagLineEdit(QLineEdit):
             self.deselect()
             self.setCursorPosition(len(self.text()))
         super().inputMethodEvent(event)
+        # プリエディット状態を更新する。
+        # keyPressEvent の Up/Down 即時表示判定や IME フォールバック更新で参照する。
+        self._current_preedit = preedit
         # IME プリエディット中もポップアップを遅延更新する。
         # super() 呼び出し後、self.text() は確定済みテキストのみを含む。
         # preedit を lambda でキャプチャして正しい文字列を渡す。
@@ -420,11 +437,24 @@ class TagInputWidget(QWidget):
     def _on_return(self) -> None:
         """Enter キー（補完候補未選択）でテキストをそのままタグとして追加する。"""
         text = self._input.text().strip().lower()
-        if text and text not in self._tags:
-            self._tags.append(text)
-            self._rebuild_chips()
-            self.tags_changed.emit(self._tags)
-            self.tag_added.emit(text)
+        if not text or text in self._tags:
+            self._input.clear()
+            return
+        # 既存タグでなければ新規作成確認ダイアログを表示
+        if text not in self._input._all_tags:
+            reply = QMessageBox.question(
+                self,
+                "新規タグの作成",
+                f'「{text}」は新しいタグです。作成しますか？',
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            )
+            if reply != QMessageBox.StandardButton.Yes:
+                self._input.clear()
+                return
+        self._tags.append(text)
+        self._rebuild_chips()
+        self.tags_changed.emit(self._tags)
+        self.tag_added.emit(text)
         self._input.clear()
 
     def _on_suggestion_confirmed(self, text: str) -> None:
