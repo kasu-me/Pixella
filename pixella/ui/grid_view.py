@@ -200,6 +200,19 @@ class ThumbnailGridWidget(QListWidget):
             lw_item.setData(TAG_COLORS_ROLE, [t.color for t in data.tags])
             self.update(self.indexFromItem(lw_item))
 
+    def update_tag_colors(self, color_map: dict[str, str | None]) -> None:
+        """タグ色マップが変更された際に全グリッドアイテムのチップ色を一括更新する。"""
+        for lw_item in self._id_to_item.values():
+            data = lw_item.data(Qt.ItemDataRole.UserRole)
+            if data is None:
+                continue
+            colors = [
+                color_map.get(t.name, t.color)
+                for t in data.tags
+            ]
+            lw_item.setData(TAG_COLORS_ROLE, colors)
+        self.viewport().update()
+
     # ------------------------------------------------------------------
     # Internal
     # ------------------------------------------------------------------

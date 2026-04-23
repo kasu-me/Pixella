@@ -279,6 +279,7 @@ class MainWindow(QMainWindow):
         if not hasattr(self, "_tag_manager_dlg") or self._tag_manager_dlg is None:
             self._tag_manager_dlg = TagManagerDialog(self)
             self._tag_manager_dlg.search_requested.connect(self._on_tag_manager_search)
+            self._tag_manager_dlg.color_changed.connect(self._on_tag_color_changed)
             self._tag_manager_dlg.finished.connect(lambda _: setattr(self, "_tag_manager_dlg", None))
         self._tag_manager_dlg.show()
         self._tag_manager_dlg.raise_()
@@ -287,6 +288,13 @@ class MainWindow(QMainWindow):
     def _on_tag_manager_search(self, tag_name: str) -> None:
         self._search_bar.set_text(tag_name)
         self._do_search([tag_name], "and")
+
+    def _on_tag_color_changed(self) -> None:
+        """タグ管理ダイアログで色が変更されたとき、詳細パネルとグリッドの色を即時更新する。"""
+        with get_session() as session:
+            cmap = all_tag_color_map(session)
+        self._detail.set_color_map(cmap)
+        self._grid.update_tag_colors(cmap)
 
     # ------------------------------------------------------------------
     # Grid refresh

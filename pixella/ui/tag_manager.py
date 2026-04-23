@@ -27,6 +27,7 @@ class TagManagerDialog(QDialog):
     """
 
     search_requested = Signal(str)   # クリックされたタグ名
+    color_changed    = Signal()       # タグ色が変更されたとき
 
     # ダイアログを閉じて再度開いてもソート順を維持するためクラス変数で保持
     _persist_sort_key: str = "name"
@@ -254,6 +255,7 @@ class TagManagerDialog(QDialog):
             set_tag_color(session, tag_id, color_str)
             session.commit()
         self._apply_color_btn_style(btn, color_str)
+        self.color_changed.emit()
 
     def _on_delete(self, tag_id: int, name: str) -> None:
         reply = QMessageBox.question(
