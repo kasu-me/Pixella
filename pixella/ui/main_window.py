@@ -554,6 +554,9 @@ class MainWindow(QMainWindow):
         elif not items:
             self._detail.clear()
 
+        # クリップボード状態に合わせて貼り付けボタンの活性状態を常に同期する
+        self._detail.set_clipboard_available(bool(self._tag_clipboard))
+
     # ------------------------------------------------------------------
     # Tags
     # ------------------------------------------------------------------

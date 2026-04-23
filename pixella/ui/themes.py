@@ -42,6 +42,12 @@ QPushButton:hover {
     background-color: #d4d4d4;
 }
 
+QPushButton:disabled {
+    color: #aaaaaa;
+    background-color: #eaeaea;
+    border-color: #d0d0d0;
+}
+
 QPushButton#primaryBtn {
     background-color: #3c82f6;
     color: white;
@@ -418,6 +424,12 @@ QPushButton {
 
 QPushButton:hover {
     background-color: #45475a;
+}
+
+QPushButton:disabled {
+    color: #585b70;
+    background-color: #1e1e2e;
+    border-color: #313244;
 }
 
 QPushButton#primaryBtn {
