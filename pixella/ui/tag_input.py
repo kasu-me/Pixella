@@ -449,7 +449,6 @@ class TagInputWidget(QWidget):
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             )
             if reply != QMessageBox.StandardButton.Yes:
-                self._input.clear()
                 return
         self._tags.append(text)
         self._rebuild_chips()
