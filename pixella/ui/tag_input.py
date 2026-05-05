@@ -233,12 +233,6 @@ class _TagLineEdit(QLineEdit):
     def inputMethodEvent(self, event: QInputMethodEvent) -> None:
         # preedit を先にキャプチャ (super() 後は変わる可能性があるため)
         preedit = event.preeditString()
-        # 安全網: 全選択状態で commitString または preedit が来た場合、
-        # super() 内部 (QWidgetLineControl) が選択テキストを削除してから挿入するため
-        # 既存テキストが消える。super() の前に必ず deselect して防ぐ。
-        if self.hasSelectedText():
-            self.deselect()
-            self.setCursorPosition(len(self.text()))
         super().inputMethodEvent(event)
         # プリエディット状態を更新する。
         # keyPressEvent の Up/Down 即時表示判定や IME フォールバック更新で参照する。
