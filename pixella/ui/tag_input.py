@@ -222,21 +222,6 @@ class _TagLineEdit(QLineEdit):
                 popup.hide()
                 return
 
-        # 安全網: 不準な selectAll() が呼ばれていた場合の保護処理。
-        # 全テキストが選択された状態で印字可能キーが押されたら、
-        # テキストを置換する代わりにカーソルを末尾に移動して追記する。
-        if (
-            self.hasSelectedText()
-            and event.text()
-            and self.selectedText() == self.text()
-            and not (event.modifiers() & (
-                Qt.KeyboardModifier.ControlModifier
-                | Qt.KeyboardModifier.AltModifier
-            ))
-        ):
-            self.deselect()
-            self.setCursorPosition(len(self.text()))
-
         super().keyPressEvent(event)
 
         # ─── IME 英語モード等で textEdited が発火しない場合のフォールバック ────
