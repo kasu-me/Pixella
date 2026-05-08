@@ -570,17 +570,23 @@ class MainWindow(QMainWindow):
         removed: set[str] = set()
         with get_session() as session:
             if isinstance(item, Image):
+                # group も eager ロードしてキャッシュ置換後に DetachedInstanceError が出ないようにする
                 fresh = session.execute(
                     select(Image).where(Image.id == item.id)
-                    .options(selectinload(Image.tags))
+                    .options(selectinload(Image.tags), selectinload(Image.group))
                 ).scalar_one_or_none()
                 if fresh:
                     removed = {t.name for t in fresh.tags} - {n.strip().lower() for n in tags if n.strip()}
                     set_image_tags(session, fresh, tags)
             else:
+                # cover_image / images も eager ロードしてキャッシュ置換後に DetachedInstanceError が出ないようにする
                 fresh = session.execute(
                     select(Group).where(Group.id == item.id)
-                    .options(selectinload(Group.tags))
+                    .options(
+                        selectinload(Group.tags),
+                        selectinload(Group.cover_image),
+                        selectinload(Group.images).selectinload(Image.tags),
+                    )
                 ).scalar_one_or_none()
                 if fresh:
                     removed = {t.name for t in fresh.tags} - {n.strip().lower() for n in tags if n.strip()}
@@ -591,6 +597,18 @@ class MainWindow(QMainWindow):
             # チップをセッション内でまとめて更新（detach 前に色情報を取得）
             if fresh:
                 self._grid.set_item_tags(fresh)
+                # ソート変更などで _reload_display() が呼ばれてもチップが戻らないよう
+                # _cached_images / _cached_groups 内の対応アイテムを最新データで差し替える
+                if isinstance(fresh, Image):
+                    for i, img in enumerate(self._cached_images):
+                        if img.id == fresh.id:
+                            self._cached_images[i] = fresh
+                            break
+                else:
+                    for i, grp in enumerate(self._cached_groups):
+                        if grp.id == fresh.id:
+                            self._cached_groups[i] = fresh
+                            break
         with get_session() as session:
             all_t = all_tag_names(session)
         self._detail.set_completion_list(all_t)
@@ -607,15 +625,27 @@ class MainWindow(QMainWindow):
             if image_ids:
                 for img in session.execute(
                     select(Image).where(Image.id.in_(image_ids))
-                    .options(selectinload(Image.tags))
+                    .options(selectinload(Image.tags), selectinload(Image.group))
                 ).scalars():
                     self._grid.set_item_tags(img)
+                    for i, cached in enumerate(self._cached_images):
+                        if cached.id == img.id:
+                            self._cached_images[i] = img
+                            break
             if group_ids:
                 for grp in session.execute(
                     select(Group).where(Group.id.in_(group_ids))
-                    .options(selectinload(Group.tags))
+                    .options(
+                        selectinload(Group.tags),
+                        selectinload(Group.cover_image),
+                        selectinload(Group.images).selectinload(Image.tags),
+                    )
                 ).scalars():
                     self._grid.set_item_tags(grp)
+                    for i, cached in enumerate(self._cached_groups):
+                        if cached.id == grp.id:
+                            self._cached_groups[i] = grp
+                            break
         self._detail.set_completion_list(all_t)
         self._search_bar.set_completion_list(all_t)
 
@@ -633,15 +663,27 @@ class MainWindow(QMainWindow):
             if image_ids:
                 for img in session.execute(
                     select(Image).where(Image.id.in_(image_ids))
-                    .options(selectinload(Image.tags))
+                    .options(selectinload(Image.tags), selectinload(Image.group))
                 ).scalars():
                     self._grid.set_item_tags(img)
+                    for i, cached in enumerate(self._cached_images):
+                        if cached.id == img.id:
+                            self._cached_images[i] = img
+                            break
             if group_ids:
                 for grp in session.execute(
                     select(Group).where(Group.id.in_(group_ids))
-                    .options(selectinload(Group.tags))
+                    .options(
+                        selectinload(Group.tags),
+                        selectinload(Group.cover_image),
+                        selectinload(Group.images).selectinload(Image.tags),
+                    )
                 ).scalars():
                     self._grid.set_item_tags(grp)
+                    for i, cached in enumerate(self._cached_groups):
+                        if cached.id == grp.id:
+                            self._cached_groups[i] = grp
+                            break
         self._detail.set_completion_list(all_t)
         self._search_bar.set_completion_list(all_t)
 
@@ -754,15 +796,27 @@ class MainWindow(QMainWindow):
             if image_ids:
                 for img in session.execute(
                     select(Image).where(Image.id.in_(image_ids))
-                    .options(selectinload(Image.tags))
+                    .options(selectinload(Image.tags), selectinload(Image.group))
                 ).scalars():
                     self._grid.set_item_tags(img)
+                    for i, cached in enumerate(self._cached_images):
+                        if cached.id == img.id:
+                            self._cached_images[i] = img
+                            break
             if group_ids:
                 for grp in session.execute(
                     select(Group).where(Group.id.in_(group_ids))
-                    .options(selectinload(Group.tags))
+                    .options(
+                        selectinload(Group.tags),
+                        selectinload(Group.cover_image),
+                        selectinload(Group.images).selectinload(Image.tags),
+                    )
                 ).scalars():
                     self._grid.set_item_tags(grp)
+                    for i, cached in enumerate(self._cached_groups):
+                        if cached.id == grp.id:
+                            self._cached_groups[i] = grp
+                            break
         self._detail.set_completion_list(all_t)
         self._detail.set_color_map(cmap)
         self._search_bar.set_completion_list(all_t)

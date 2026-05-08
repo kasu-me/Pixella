@@ -197,6 +197,10 @@ class ThumbnailGridWidget(QListWidget):
         key = f"img:{data.id}" if isinstance(data, Image) else f"grp:{data.id}"
         lw_item = self._id_to_item.get(key)
         if lw_item:
+            # UserRole も最新データで更新しておく。
+            # update_tag_colors が UserRole.tags を参照するため、
+            # ここを更新しないと色変更時にチップが古い状態に戻る。
+            lw_item.setData(Qt.ItemDataRole.UserRole, data)
             lw_item.setData(TAG_COLORS_ROLE, [t.color for t in data.tags])
             self.update(self.indexFromItem(lw_item))
 
