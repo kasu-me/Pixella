@@ -109,3 +109,6 @@ pixella/
 
 > [!WARNING]
 > 手順 2 を実行するとデータベース (`pixella.db`) およびサムネイルキャッシュが完全に削除されます。事前に JSON 書き出し（Ctrl+E）でバックアップを取ることを推奨します。
+
+## 関連プロジェクト
+本アプリからエクスポートしたJSONファイルをもとに、画像の検索･閲覧ができるWebアプリ [Pixella Web Viewer](https://github.com/kasu-me/Pixella-Web-Viewer) もご利用ください。
