@@ -8,6 +8,16 @@ from PySide6.QtWidgets import (
 )
 
 
+# ── Utilities ───────────────────────────────────────────────────────────────
+
+def _contrast_color(hex_color: str) -> str:
+    """Return '#000000' or '#ffffff' for best readability on the given background."""
+    c = hex_color.lstrip('#')
+    r, g, b = int(c[0:2], 16), int(c[2:4], 16), int(c[4:6], 16)
+    luminance = 0.299 * r + 0.587 * g + 0.114 * b
+    return '#000000' if luminance > 128 else '#ffffff'
+
+
 # ── Flow chip container ───────────────────────────────────────────────────────
 
 class _ChipContainer(QWidget):
@@ -84,10 +94,26 @@ class _AvailChip(QPushButton):
 
     chosen = Signal(str)
 
-    def __init__(self, tag: str, parent: QWidget | None = None) -> None:
-        super().__init__(tag, parent)
+    def __init__(
+        self,
+        tag: str,
+        count: int = 0,
+        color: str | None = None,
+        parent: QWidget | None = None,
+    ) -> None:
+        label = f"{tag} ({count})" if count > 0 else tag
+        super().__init__(label, parent)
         self._tag = tag
         self.setObjectName("searchAvailChip")
+        if color:
+            text_color = _contrast_color(color)
+            self.setStyleSheet(
+                f"QPushButton#searchAvailChip {{"
+                f" background-color: {color}; color: {text_color};"
+                f" border-color: {color}; }}"
+                f" QPushButton#searchAvailChip:hover {{"
+                f" background-color: {color}; opacity: 0.85; }}"
+            )
         self.clicked.connect(lambda: self.chosen.emit(self._tag))
 
     @property
@@ -122,7 +148,7 @@ class SearchBar(QWidget):
         super().__init__(parent)
         self.setObjectName("searchBarPanel")
         self._selected: list[str] = []
-        self._all_tags: list[str] = []
+        self._all_tags: list[tuple[str, int, str | None]] = []
         self._mode: str = "and"
 
         outer = QVBoxLayout(self)
@@ -234,8 +260,8 @@ class SearchBar(QWidget):
 
     # ── Public API ────────────────────────────────────────────────────────────
 
-    def set_completion_list(self, tags: list[str]) -> None:
-        """利用可能なタグリストをセットする。"""
+    def set_completion_list(self, tags: list[tuple[str, int, str | None]]) -> None:
+        """利用可能なタグリストをセットする。(タグ名, 件数, カラー) のリスト。"""
         self._all_tags = list(tags)
         self._rebuild_available()
 
@@ -303,12 +329,12 @@ class SearchBar(QWidget):
     def _rebuild_available(self) -> None:
         filt = self._filter_input.text().strip().lower()
         chips: list[QWidget] = []
-        for tag in self._all_tags:
+        for tag, count, color in self._all_tags:
             if tag in self._selected:
                 continue
             if filt and filt not in tag.lower():
                 continue
-            chip = _AvailChip(tag)
+            chip = _AvailChip(tag, count, color)
             chip.chosen.connect(self._add_tag)
             chips.append(chip)
         self._avail_chips.set_chips(chips)

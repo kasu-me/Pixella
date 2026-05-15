@@ -15,7 +15,7 @@ from PySide6.QtWidgets import (
 from pixella import __app_name__, __version__
 from pixella.core import ThumbnailCache, ThumbnailWorkerPool, THUMB_DIR, SUPPORTED_EXTS
 from pixella.db import (
-    get_session, all_images, all_groups, all_tag_names, all_tag_color_map,
+    get_session, all_images, all_groups, all_tag_names, all_tag_color_map, all_tags_with_count,
     add_images, images_without_tags, groups_without_tags, create_group, merge_groups, rename_group, dissolve_group,
     remove_image_from_group, set_image_tags, set_group_tags,
     export_json, import_json, bulk_apply_tag_delta, bulk_apply_group_tag_delta,
@@ -307,11 +307,12 @@ class MainWindow(QMainWindow):
         with get_session() as session:
             self._cached_images = all_images(session)
             self._cached_groups = all_groups(session)
-            tags   = all_tag_names(session)
-            cmap   = all_tag_color_map(session)
+            tags      = all_tag_names(session)
+            tag_infos = [(t.name, cnt, t.color) for t, cnt in all_tags_with_count(session)]
+            cmap      = all_tag_color_map(session)
         self._detail.set_completion_list(tags)
         self._detail.set_color_map(cmap)
-        self._search_bar.set_completion_list(tags)
+        self._search_bar.set_completion_list(tag_infos)
         self._reload_display()
 
     def _reload_display(self) -> None:
@@ -610,9 +611,10 @@ class MainWindow(QMainWindow):
                             self._cached_groups[i] = fresh
                             break
         with get_session() as session:
-            all_t = all_tag_names(session)
+            all_t     = all_tag_names(session)
+            tag_infos = [(t.name, cnt, t.color) for t, cnt in all_tags_with_count(session)]
         self._detail.set_completion_list(all_t)
-        self._search_bar.set_completion_list(all_t)
+        self._search_bar.set_completion_list(tag_infos)
 
     def _on_multi_tag_added(self, items: list, tag: str) -> None:
         """複数アイテム選択時: 指定タグを全画像・グループに追加する。"""
@@ -621,7 +623,8 @@ class MainWindow(QMainWindow):
         bulk_apply_tag_delta(image_ids, added={tag}, removed=set())
         bulk_apply_group_tag_delta(group_ids, added={tag}, removed=set())
         with get_session() as session:
-            all_t = all_tag_names(session)
+            all_t     = all_tag_names(session)
+            tag_infos = [(t.name, cnt, t.color) for t, cnt in all_tags_with_count(session)]
             if image_ids:
                 for img in session.execute(
                     select(Image).where(Image.id.in_(image_ids))
@@ -647,7 +650,7 @@ class MainWindow(QMainWindow):
                             self._cached_groups[i] = grp
                             break
         self._detail.set_completion_list(all_t)
-        self._search_bar.set_completion_list(all_t)
+        self._search_bar.set_completion_list(tag_infos)
 
     def _on_multi_tag_removed(self, items: list, tag: str) -> None:
         """複数アイテム選択時: 指定タグを全画像・グループから削除する。"""
@@ -659,7 +662,8 @@ class MainWindow(QMainWindow):
             # タグが孤立して無色なら自動削除（bulk_apply 後に実施）
             cleanup_uncolored_orphan_tags(session, [tag])
             session.commit()
-            all_t = all_tag_names(session)  # cleanup 後に取得
+            all_t     = all_tag_names(session)  # cleanup 後に取得
+            tag_infos = [(t.name, cnt, t.color) for t, cnt in all_tags_with_count(session)]
             if image_ids:
                 for img in session.execute(
                     select(Image).where(Image.id.in_(image_ids))
@@ -685,7 +689,7 @@ class MainWindow(QMainWindow):
                             self._cached_groups[i] = grp
                             break
         self._detail.set_completion_list(all_t)
-        self._search_bar.set_completion_list(all_t)
+        self._search_bar.set_completion_list(tag_infos)
 
     def _on_remove_from_group(self, image: Image) -> None:
         with get_session() as session:
@@ -791,7 +795,8 @@ class MainWindow(QMainWindow):
         bulk_apply_tag_delta(image_ids, added=set(self._tag_clipboard), removed=set())
         bulk_apply_group_tag_delta(group_ids, added=set(self._tag_clipboard), removed=set())
         with get_session() as session:
-            all_t = all_tag_names(session)
+            all_t     = all_tag_names(session)
+            tag_infos = [(t.name, cnt, t.color) for t, cnt in all_tags_with_count(session)]
             cmap = all_tag_color_map(session)
             if image_ids:
                 for img in session.execute(
@@ -819,7 +824,7 @@ class MainWindow(QMainWindow):
                             break
         self._detail.set_completion_list(all_t)
         self._detail.set_color_map(cmap)
-        self._search_bar.set_completion_list(all_t)
+        self._search_bar.set_completion_list(tag_infos)
         # 詳細パネルを再表示
         self._on_selection_changed(selected)
         self._status_label.setText(f"タグ {len(self._tag_clipboard)} 件を貼り付けました")
