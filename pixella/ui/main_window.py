@@ -5,7 +5,7 @@ import os
 from datetime import datetime
 from pathlib import Path
 
-from PySide6.QtCore import Qt, QSettings
+from PySide6.QtCore import Qt, QSettings, QTimer
 from PySide6.QtGui import QAction, QKeySequence
 from PySide6.QtWidgets import (
     QApplication, QFileDialog, QHBoxLayout, QLabel, QMainWindow,
@@ -610,11 +610,11 @@ class MainWindow(QMainWindow):
                         if grp.id == fresh.id:
                             self._cached_groups[i] = fresh
                             break
-        with get_session() as session:
+            # commit() 後に同一セッションで補完リストを取得（セッション開閉のオーバーヘッドを削減）
             all_t     = all_tag_names(session)
             tag_infos = [(t.name, cnt, t.color) for t, cnt in all_tags_with_count(session)]
         self._detail.set_completion_list(all_t)
-        self._search_bar.set_completion_list(tag_infos)
+        QTimer.singleShot(0, lambda infos=tag_infos: self._search_bar.set_completion_list(infos))
 
     def _on_multi_tag_added(self, items: list, tag: str) -> None:
         """複数アイテム選択時: 指定タグを全画像・グループに追加する。"""
@@ -650,7 +650,7 @@ class MainWindow(QMainWindow):
                             self._cached_groups[i] = grp
                             break
         self._detail.set_completion_list(all_t)
-        self._search_bar.set_completion_list(tag_infos)
+        QTimer.singleShot(0, lambda infos=tag_infos: self._search_bar.set_completion_list(infos))
 
     def _on_multi_tag_removed(self, items: list, tag: str) -> None:
         """複数アイテム選択時: 指定タグを全画像・グループから削除する。"""
@@ -689,7 +689,7 @@ class MainWindow(QMainWindow):
                             self._cached_groups[i] = grp
                             break
         self._detail.set_completion_list(all_t)
-        self._search_bar.set_completion_list(tag_infos)
+        QTimer.singleShot(0, lambda infos=tag_infos: self._search_bar.set_completion_list(infos))
 
     def _on_remove_from_group(self, image: Image) -> None:
         with get_session() as session:

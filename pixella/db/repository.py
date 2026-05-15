@@ -50,20 +50,24 @@ def all_tags_with_count(session: Session) -> list[tuple[Tag, int]]:
     """タグ一覧をそのタグが付いた画像数 + グループ数と合わせて返す。Tag オブジェクトに color が含まれる。"""
     from sqlalchemy import func
     from .models import image_tag_table, group_tag_table
-    img_cnt = (
-        select(func.count(image_tag_table.c.image_id))
-        .where(image_tag_table.c.tag_id == Tag.id)
-        .correlate(Tag)
-        .scalar_subquery()
+    # 相関サブクエリ（N回×2）の代わりに GROUP BY サブクエリ（2回）+ JOIN で集計する
+    img_agg = (
+        select(image_tag_table.c.tag_id, func.count().label("cnt"))
+        .group_by(image_tag_table.c.tag_id)
+        .subquery()
     )
-    grp_cnt = (
-        select(func.count(group_tag_table.c.group_id))
-        .where(group_tag_table.c.tag_id == Tag.id)
-        .correlate(Tag)
-        .scalar_subquery()
+    grp_agg = (
+        select(group_tag_table.c.tag_id, func.count().label("cnt"))
+        .group_by(group_tag_table.c.tag_id)
+        .subquery()
     )
     rows = session.execute(
-        select(Tag, (img_cnt + grp_cnt).label("cnt"))
+        select(
+            Tag,
+            (func.coalesce(img_agg.c.cnt, 0) + func.coalesce(grp_agg.c.cnt, 0)).label("cnt"),
+        )
+        .outerjoin(img_agg, img_agg.c.tag_id == Tag.id)
+        .outerjoin(grp_agg, grp_agg.c.tag_id == Tag.id)
         .order_by(Tag.name)
     ).all()
     return [(row.Tag, row.cnt) for row in rows]
