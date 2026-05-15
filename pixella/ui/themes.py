@@ -99,6 +99,110 @@ QPushButton#searchModeBtn:checked {
     color: #ffffff;
 }
 
+/* ---- Search Bar Panel (chip-based) ---- */
+QWidget#searchBarPanel {
+    background-color: #f8f9fc;
+    border: 1px solid #d0d4dc;
+    border-radius: 6px;
+}
+
+QLabel#searchPlaceholder {
+    color: #9098b0;
+    font-size: 9pt;
+    padding: 2px 2px;
+}
+
+QPushButton#searchSelectedChip {
+    background-color: #3c82f6;
+    color: #ffffff;
+    border: 1px solid #2563eb;
+    border-radius: 12px;
+    padding: 3px 10px;
+    font-size: 9pt;
+}
+
+QPushButton#searchSelectedChip:hover {
+    background-color: #2563eb;
+}
+
+QPushButton#searchAvailChip {
+    background-color: #dbeafe;
+    color: #1d4ed8;
+    border: 1px solid #bfdbfe;
+    border-radius: 12px;
+    padding: 3px 10px;
+    font-size: 9pt;
+}
+
+QPushButton#searchAvailChip:hover {
+    background-color: #bfdbfe;
+    border-color: #3c82f6;
+}
+
+QFrame#modeToggleFrame {
+    border: 1px solid #b8bcc8;
+    border-radius: 5px;
+    background: transparent;
+}
+
+QPushButton#modeAndBtn,
+QPushButton#modeOrBtn {
+    background-color: transparent;
+    border: none;
+    border-radius: 4px;
+    padding: 4px 6px;
+    color: #7a8099;
+    font-size: 8.5pt;
+    font-weight: bold;
+}
+
+QPushButton#modeAndBtn:checked,
+QPushButton#modeOrBtn:checked {
+    background-color: #3c82f6;
+    color: #ffffff;
+}
+
+QPushButton#clearBtn {
+    background-color: transparent;
+    border: 1px solid #b8bcc8;
+    border-radius: 5px;
+    padding: 4px 10px;
+    color: #7a8099;
+    font-size: 9pt;
+}
+
+QPushButton#clearBtn:hover {
+    color: #ef4444;
+    border-color: #ef4444;
+    background-color: #fee2e2;
+}
+
+QLineEdit#tagFilterInput {
+    background-color: #f0f2f5;
+    border: 1px solid #d0d4dc;
+    border-radius: 5px;
+    padding: 4px 8px;
+    font-size: 9pt;
+    color: #1a1a1a;
+}
+
+QLineEdit#tagFilterInput:focus {
+    border: 1.5px solid #3c82f6;
+}
+
+QLabel#availTagsHeader {
+    color: #8890a8;
+    font-size: 8pt;
+    font-weight: bold;
+    letter-spacing: 0.3px;
+}
+
+QScrollArea#availTagsScroll {
+    border: 1px solid #d0d4dc;
+    border-radius: 5px;
+    background-color: #f8f9fc;
+}
+
 QLabel#sectionTitle {
     font-weight: bold;
     color: #555555;
@@ -480,6 +584,111 @@ QPushButton#searchModeBtn:checked {
     background-color: #89b4fa;
     border-color: #74c7ec;
     color: #1e1e2e;
+}
+
+/* ---- Search Bar Panel (chip-based) ---- */
+QWidget#searchBarPanel {
+    background-color: #1b1d27;
+    border: 1px solid #2e3148;
+    border-radius: 6px;
+}
+
+QLabel#searchPlaceholder {
+    color: #5a6080;
+    font-size: 9pt;
+    padding: 2px 2px;
+}
+
+QPushButton#searchSelectedChip {
+    background-color: #3a4f99;
+    color: #cdd6f4;
+    border: 1px solid #6c8fff;
+    border-radius: 12px;
+    padding: 3px 10px;
+    font-size: 9pt;
+}
+
+QPushButton#searchSelectedChip:hover {
+    background-color: #4a60b0;
+}
+
+QPushButton#searchAvailChip {
+    background-color: #1e2540;
+    color: #8b90a8;
+    border: 1px solid #2e3148;
+    border-radius: 12px;
+    padding: 3px 10px;
+    font-size: 9pt;
+}
+
+QPushButton#searchAvailChip:hover {
+    background-color: #2c3760;
+    border-color: #89b4fa;
+    color: #cdd6f4;
+}
+
+QFrame#modeToggleFrame {
+    border: 1px solid #45475a;
+    border-radius: 5px;
+    background: transparent;
+}
+
+QPushButton#modeAndBtn,
+QPushButton#modeOrBtn {
+    background-color: transparent;
+    border: none;
+    border-radius: 4px;
+    padding: 4px 6px;
+    color: #6c7086;
+    font-size: 8.5pt;
+    font-weight: bold;
+}
+
+QPushButton#modeAndBtn:checked,
+QPushButton#modeOrBtn:checked {
+    background-color: #89b4fa;
+    color: #1e1e2e;
+}
+
+QPushButton#clearBtn {
+    background-color: transparent;
+    border: 1px solid #45475a;
+    border-radius: 5px;
+    padding: 4px 10px;
+    color: #6c7086;
+    font-size: 9pt;
+}
+
+QPushButton#clearBtn:hover {
+    color: #f38ba8;
+    border-color: #f38ba8;
+    background-color: #3b1a1a;
+}
+
+QLineEdit#tagFilterInput {
+    background-color: #252535;
+    border: 1px solid #3a3a50;
+    border-radius: 5px;
+    padding: 4px 8px;
+    font-size: 9pt;
+    color: #cdd6f4;
+}
+
+QLineEdit#tagFilterInput:focus {
+    border: 1.5px solid #89b4fa;
+}
+
+QLabel#availTagsHeader {
+    color: #6c7086;
+    font-size: 8pt;
+    font-weight: bold;
+    letter-spacing: 0.3px;
+}
+
+QScrollArea#availTagsScroll {
+    border: 1px solid #313244;
+    border-radius: 5px;
+    background-color: #181825;
 }
 
 QLabel#sectionTitle {
