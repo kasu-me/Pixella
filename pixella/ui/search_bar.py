@@ -18,6 +18,31 @@ def _contrast_color(hex_color: str) -> str:
     return '#000000' if luminance > 128 else '#ffffff'
 
 
+# ── Filter input (IME-aware) ──────────────────────────────────────────────
+
+class _FilterInput(QLineEdit):
+    """タグ絞り込み用 QLineEdit。
+    IME 入力途中の Enter（変換確定）では発火せず、入力確定後の Enter のみ confirmed を発火する。
+    """
+
+    confirmed = Signal()
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self._composing = False
+
+    def inputMethodEvent(self, event) -> None:  # type: ignore[override]
+        self._composing = bool(event.preeditString())
+        super().inputMethodEvent(event)
+
+    def keyPressEvent(self, event) -> None:  # type: ignore[override]
+        if event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
+            if not self._composing:
+                self.confirmed.emit()
+                return
+        super().keyPressEvent(event)
+
+
 # ── Flow chip container ───────────────────────────────────────────────────────
 
 class _ChipContainer(QWidget):
@@ -225,10 +250,11 @@ class SearchBar(QWidget):
         outer.addLayout(row1)
 
         # ── Row 2: tag filter input ───────────────────────────────────────
-        self._filter_input = QLineEdit()
+        self._filter_input = _FilterInput()
         self._filter_input.setObjectName("tagFilterInput")
         self._filter_input.setPlaceholderText("タグを絞り込み…")
         self._filter_input.textChanged.connect(self._on_filter_changed)
+        self._filter_input.confirmed.connect(self._on_filter_confirmed)
         outer.addWidget(self._filter_input)
 
         # ── Row 3: available tags ─────────────────────────────────────────
@@ -297,6 +323,9 @@ class SearchBar(QWidget):
         self._untagged_btn.setChecked(False)
         self._untagged_btn.blockSignals(False)
         self._selected.append(tag)
+        self._filter_input.blockSignals(True)
+        self._filter_input.clear()
+        self._filter_input.blockSignals(False)
         self._rebuild_selected()
         self._rebuild_available()
         self._emit_search()
@@ -341,6 +370,16 @@ class SearchBar(QWidget):
 
     def _on_filter_changed(self, _text: str) -> None:
         self._rebuild_available()
+
+    def _on_filter_confirmed(self) -> None:
+        """タグ絞り込み欄でEnter確定時、入力内容と完全一致するタグを追加する。"""
+        text = self._filter_input.text().strip().lower()
+        if not text:
+            return
+        for tag, _count, _color in self._all_tags:
+            if tag == text and tag not in self._selected:
+                self._add_tag(tag)  # 内部でフィルターもクリアされる
+                return
 
     def _on_and_clicked(self) -> None:
         self._mode = "and"
