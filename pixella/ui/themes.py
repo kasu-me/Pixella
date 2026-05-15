@@ -146,7 +146,8 @@ QFrame#modeToggleFrame {
 }
 
 QPushButton#modeAndBtn,
-QPushButton#modeOrBtn {
+QPushButton#modeOrBtn,
+QPushButton#modeExactBtn {
     background-color: transparent;
     border: none;
     border-radius: 4px;
@@ -157,7 +158,8 @@ QPushButton#modeOrBtn {
 }
 
 QPushButton#modeAndBtn:checked,
-QPushButton#modeOrBtn:checked {
+QPushButton#modeOrBtn:checked,
+QPushButton#modeExactBtn:checked {
     background-color: #3c82f6;
     color: #ffffff;
 }
@@ -634,7 +636,8 @@ QFrame#modeToggleFrame {
 }
 
 QPushButton#modeAndBtn,
-QPushButton#modeOrBtn {
+QPushButton#modeOrBtn,
+QPushButton#modeExactBtn {
     background-color: transparent;
     border: none;
     border-radius: 4px;
@@ -645,7 +648,8 @@ QPushButton#modeOrBtn {
 }
 
 QPushButton#modeAndBtn:checked,
-QPushButton#modeOrBtn:checked {
+QPushButton#modeOrBtn:checked,
+QPushButton#modeExactBtn:checked {
     background-color: #89b4fa;
     color: #1e1e2e;
 }

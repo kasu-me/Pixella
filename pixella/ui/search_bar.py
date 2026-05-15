@@ -114,7 +114,7 @@ class SearchBar(QWidget):
         untagged_requested()
     """
 
-    search_requested   = Signal(list, str)   # list[str] tags, mode "and"|"or"
+    search_requested   = Signal(list, str)   # list[str] tags, mode "and"|"or"|"exact"
     cleared            = Signal()
     untagged_requested = Signal()
 
@@ -173,8 +173,14 @@ class SearchBar(QWidget):
         self._btn_or.setFixedWidth(40)
         self._btn_or.clicked.connect(self._on_or_clicked)
 
+        self._btn_exact = QPushButton("完全一致")
+        self._btn_exact.setObjectName("modeExactBtn")
+        self._btn_exact.setCheckable(True)
+        self._btn_exact.clicked.connect(self._on_exact_clicked)
+
         mode_layout.addWidget(self._btn_and)
         mode_layout.addWidget(self._btn_or)
+        mode_layout.addWidget(self._btn_exact)
         row1.addWidget(mode_frame)
 
         # タグなし toggle
@@ -314,6 +320,7 @@ class SearchBar(QWidget):
         self._mode = "and"
         self._btn_and.setChecked(True)
         self._btn_or.setChecked(False)
+        self._btn_exact.setChecked(False)
         if self._selected:
             self._emit_search()
 
@@ -321,6 +328,15 @@ class SearchBar(QWidget):
         self._mode = "or"
         self._btn_and.setChecked(False)
         self._btn_or.setChecked(True)
+        self._btn_exact.setChecked(False)
+        if self._selected:
+            self._emit_search()
+
+    def _on_exact_clicked(self) -> None:
+        self._mode = "exact"
+        self._btn_and.setChecked(False)
+        self._btn_or.setChecked(False)
+        self._btn_exact.setChecked(True)
         if self._selected:
             self._emit_search()
 

@@ -833,7 +833,7 @@ class MainWindow(QMainWindow):
         self._view_mode = "search"
         self._view_search_tags = list(tags)
         self._view_search_mode = mode
-        mode_label = "OR" if mode == "or" else "AND"
+        mode_label = {"or": "OR", "exact": "完全一致"}.get(mode, "AND")
         self._breadcrumb.set_search(f"[{mode_label}] {' '.join(tags)}")
         with get_session() as session:
             images, groups = search_by_tags(session, tags, mode)

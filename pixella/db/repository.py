@@ -541,19 +541,34 @@ def search_by_tags(
     mode: str = "and",
 ) -> tuple[list[Image], list[Group]]:
     """Return images and groups matching the specified tags.
-    mode='and': all tags must be present (AND search)
-    mode='or':  any tag must be present (OR search)
+    mode='and':   all tags must be present (AND search)
+    mode='or':    any tag must be present (OR search)
+    mode='exact': tag set must match exactly — no extra tags allowed
     """
     if not tag_names:
         return [], []
+
+    from sqlalchemy import func
+    from .models import image_tag_table, group_tag_table
 
     # images
     img_q = select(Image).options(selectinload(Image.tags), selectinload(Image.group))
     if mode == "or":
         img_q = img_q.where(or_(*[Image.tags.any(Tag.name == n.lower()) for n in tag_names]))
     else:
+        # AND / exact: all specified tags must be present
         for name in tag_names:
             img_q = img_q.where(Image.tags.any(Tag.name == name.lower()))
+        if mode == "exact":
+            # additionally, no extra tags
+            tag_count_sub = (
+                select(func.count())
+                .select_from(image_tag_table)
+                .where(image_tag_table.c.image_id == Image.id)
+                .correlate(Image)
+                .scalar_subquery()
+            )
+            img_q = img_q.where(tag_count_sub == len(tag_names))
     images = list(session.execute(img_q).scalars().all())
 
     # groups
@@ -567,6 +582,15 @@ def search_by_tags(
     else:
         for name in tag_names:
             grp_q = grp_q.where(Group.tags.any(Tag.name == name.lower()))
+        if mode == "exact":
+            tag_count_sub = (
+                select(func.count())
+                .select_from(group_tag_table)
+                .where(group_tag_table.c.group_id == Group.id)
+                .correlate(Group)
+                .scalar_subquery()
+            )
+            grp_q = grp_q.where(tag_count_sub == len(tag_names))
     groups = list(session.execute(grp_q).scalars().all())
 
     return images, groups
