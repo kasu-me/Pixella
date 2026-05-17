@@ -121,12 +121,33 @@ def init_db(db_path: str | Path) -> None:
     # バックフィル: ctime が NULL の既存レコードにファイルシステムから取得して埋める
     _SessionLocal = sessionmaker(bind=engine, expire_on_commit=False)
     _backfill_ctime()
+    _normalize_backslash_paths()
 
 
 def get_session() -> Session:
     if _SessionLocal is None:
         raise RuntimeError("Database not initialized. Call init_db() first.")
     return _SessionLocal()
+
+
+def _normalize_backslash_paths() -> None:
+    """path にバックスラッシュが含まれる既存レコードをフォワードスラッシュに変換する。"""
+    from sqlalchemy import text
+    with _SessionLocal() as session:
+        rows = session.execute(
+            text("SELECT id, path FROM images WHERE path LIKE '%\\\\%'")
+        ).fetchall()
+        if not rows:
+            return
+        updates = [
+            {"id": row_id, "path": path.replace("\\", "/")}
+            for row_id, path in rows
+        ]
+        session.execute(
+            text("UPDATE images SET path = :path WHERE id = :id"),
+            updates,
+        )
+        session.commit()
 
 
 def _backfill_ctime() -> None:
