@@ -606,8 +606,9 @@ def search_by_tags(
 # JSON export / import
 # ---------------------------------------------------------------------------
 
-def export_json(session: Session, path: str | Path) -> None:
-    data = {
+def _export_to_dict(session: Session) -> dict:
+    """現在のセッションのデータを辞書形式で返す内部ヘルパー。"""
+    return {
         "tags": [
             {"name": t.name, "color": t.color}
             for t in session.execute(select(Tag).order_by(Tag.name)).scalars().all()
@@ -633,7 +634,46 @@ def export_json(session: Session, path: str | Path) -> None:
             for g in all_groups(session)
         ],
     }
+
+
+def export_json(session: Session, path: str | Path) -> None:
+    """アクティブアルバムのデータをJSONに書き出す（従来形式）。"""
+    data = _export_to_dict(session)
     Path(path).write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def export_json_combined(albums: list[tuple[str, "Path"]], out_path: str | Path) -> None:
+    """複数アルバムをまとめて1つのJSONに書き出す（マルチアルバム形式）。
+
+    Parameters
+    ----------
+    albums:
+        [(アルバム名, DBファイルパス), ...] のリスト。
+        アクティブなアルバムDBを含む全アルバムを渡す。
+    out_path:
+        書き出し先ファイルパス。
+    """
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker as _sm
+
+    result: dict = {
+        "format": "pixella_multi_album",
+        "version": 1,
+        "albums": [],
+    }
+    for name, db_path in albums:
+        engine = create_engine(
+            f"sqlite:///{db_path}",
+            connect_args={"check_same_thread": False},
+        )
+        SL = _sm(bind=engine, expire_on_commit=False)
+        with SL() as session:
+            album_data = _export_to_dict(session)
+        engine.dispose()
+        album_data["name"] = name
+        result["albums"].append(album_data)
+
+    Path(out_path).write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
 def _validate_import_json(data: object) -> None:
@@ -667,11 +707,74 @@ def _validate_import_json(data: object) -> None:
             raise ValueError(f"groups[{i}]: 'image_ids' はリストである必要があります")
 
 
-def import_json(path: str | Path) -> None:
-    """JSONファイルを読み込み、全データを置き換える。バリデーション後に実行する。"""
-    from datetime import datetime as _dt
+def _do_import(session: Session, data: dict) -> None:
+    """既存セッションに対してデータを全置換でインポートする内部ヘルパー。
+
+    この関数は session.commit() を呼ばない。呼び出し元で commit すること。
+    """
     from sqlalchemy import text
 
+    # 全データを削除（CASCADE で中間テーブルも自動削除）
+    session.execute(delete(Image))
+    session.execute(delete(Group))
+    session.execute(delete(Tag))
+    session.flush()
+
+    # タグを再作成
+    tag_map: dict[str, Tag] = {}
+    for t in data["tags"]:
+        name = t["name"].strip().lower()
+        if not name or name in tag_map:
+            continue
+        tag = Tag(name=name, color=t.get("color"))
+        session.add(tag)
+        tag_map[name] = tag
+    session.flush()
+
+    # 画像を再作成 (旧 id -> Image オブジェクト のマッピング)
+    img_map: dict[int, Image] = {}
+    for img_data in data["images"]:
+        img = Image(
+            path=img_data["path"],
+            ctime=img_data.get("ctime"),
+        )
+        session.add(img)
+        img_map[int(img_data["id"])] = img
+    session.flush()
+
+    # 画像-タグ関連付け
+    for img_data in data["images"]:
+        img = img_map[int(img_data["id"])]
+        img.tags = [tag_map[n.strip().lower()] for n in img_data.get("tags", [])
+                    if n.strip().lower() in tag_map]
+    session.flush()
+
+    # グループを再作成
+    for grp_data in data["groups"]:
+        grp = Group(name=grp_data["name"])
+        session.add(grp)
+        session.flush()
+
+        member_imgs = [img_map[int(i)] for i in grp_data.get("image_ids", [])
+                       if int(i) in img_map]
+        for img in member_imgs:
+            img.group_id = grp.id
+
+        cover_old_id = grp_data.get("cover_image_id")
+        if cover_old_id is not None and int(cover_old_id) in img_map:
+            grp.cover_image_id = img_map[int(cover_old_id)].id
+        elif member_imgs:
+            grp.cover_image_id = member_imgs[0].id
+
+        grp.tags = [tag_map[n.strip().lower()] for n in grp_data.get("tags", [])
+                    if n.strip().lower() in tag_map]
+        session.flush()
+
+    session.commit()
+
+
+def import_json(path: str | Path) -> None:
+    """JSONファイルを読み込み、アクティブアルバムの全データを置き換える。"""
     raw = Path(path).read_text(encoding="utf-8")
     try:
         data = json.loads(raw)
@@ -681,60 +784,4 @@ def import_json(path: str | Path) -> None:
     _validate_import_json(data)
 
     with get_session() as session:
-        # 全データを削除（CASCADE で中間テーブルも自動削除）
-        session.execute(delete(Image))
-        session.execute(delete(Group))
-        session.execute(delete(Tag))
-        session.flush()
-
-        # タグを再作成
-        tag_map: dict[str, Tag] = {}
-        for t in data["tags"]:
-            name = t["name"].strip().lower()
-            if not name or name in tag_map:
-                continue
-            tag = Tag(name=name, color=t.get("color"))
-            session.add(tag)
-            tag_map[name] = tag
-        session.flush()
-
-        # 画像を再作成 (旧 id -> Image オブジェクト のマッピング)
-        img_map: dict[int, Image] = {}
-        for img_data in data["images"]:
-            img = Image(
-                path=img_data["path"],
-                ctime=img_data.get("ctime"),
-            )
-            session.add(img)
-            img_map[int(img_data["id"])] = img
-        session.flush()
-
-        # 画像-タグ関連付け
-        for img_data in data["images"]:
-            img = img_map[int(img_data["id"])]
-            img.tags = [tag_map[n.strip().lower()] for n in img_data.get("tags", [])
-                        if n.strip().lower() in tag_map]
-        session.flush()
-
-        # グループを再作成
-        for grp_data in data["groups"]:
-            grp = Group(name=grp_data["name"])
-            session.add(grp)
-            session.flush()
-
-            member_imgs = [img_map[int(i)] for i in grp_data.get("image_ids", [])
-                           if int(i) in img_map]
-            for img in member_imgs:
-                img.group_id = grp.id
-
-            cover_old_id = grp_data.get("cover_image_id")
-            if cover_old_id is not None and int(cover_old_id) in img_map:
-                grp.cover_image_id = img_map[int(cover_old_id)].id
-            elif member_imgs:
-                grp.cover_image_id = member_imgs[0].id
-
-            grp.tags = [tag_map[n.strip().lower()] for n in grp_data.get("tags", [])
-                        if n.strip().lower() in tag_map]
-            session.flush()
-
-        session.commit()
+        _do_import(session, data)

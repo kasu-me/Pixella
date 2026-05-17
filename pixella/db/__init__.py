@@ -4,8 +4,9 @@ from .repository import (
     all_tag_color_map, all_tags_with_count, delete_tag, set_tag_color,
     create_group, merge_groups, rename_group, dissolve_group, remove_image, remove_image_from_group,
     search_by_tags, set_image_tags, set_group_tags, set_group_cover,
-    export_json, import_json, get_or_create_tag, bulk_apply_tag_delta, bulk_apply_group_tag_delta,
-    cleanup_uncolored_orphan_tags,
+    export_json, export_json_combined, import_json, get_or_create_tag,
+    bulk_apply_tag_delta, bulk_apply_group_tag_delta,
+    cleanup_uncolored_orphan_tags, _do_import, _validate_import_json,
 )
 
 __all__ = [
@@ -14,6 +15,7 @@ __all__ = [
     "all_tag_color_map", "all_tags_with_count", "delete_tag", "set_tag_color",
     "create_group", "merge_groups", "rename_group", "dissolve_group", "remove_image", "remove_image_from_group",
     "search_by_tags", "set_image_tags", "set_group_tags", "set_group_cover",
-    "export_json", "import_json", "get_or_create_tag", "bulk_apply_tag_delta", "bulk_apply_group_tag_delta",
-    "cleanup_uncolored_orphan_tags",
+    "export_json", "export_json_combined", "import_json", "get_or_create_tag",
+    "bulk_apply_tag_delta", "bulk_apply_group_tag_delta",
+    "cleanup_uncolored_orphan_tags", "_do_import", "_validate_import_json",
 ]

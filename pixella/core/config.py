@@ -14,5 +14,7 @@ DATA_DIR.mkdir(parents=True, exist_ok=True)
 DB_PATH    = DATA_DIR / "pixella.db"
 THUMB_DIR  = DATA_DIR / "thumbnails"
 EXPORT_DIR = DATA_DIR / "exports"
+ALBUMS_DIR = DATA_DIR / "albums"
 
 EXPORT_DIR.mkdir(parents=True, exist_ok=True)
+ALBUMS_DIR.mkdir(parents=True, exist_ok=True)

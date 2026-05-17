@@ -8,18 +8,20 @@ from pathlib import Path
 from PySide6.QtCore import Qt, QSettings, QTimer
 from PySide6.QtGui import QAction, QKeySequence
 from PySide6.QtWidgets import (
-    QApplication, QFileDialog, QHBoxLayout, QLabel, QMainWindow,
-    QMessageBox, QSplitter, QStatusBar, QToolBar, QVBoxLayout, QWidget,
+    QApplication, QComboBox, QFileDialog, QHBoxLayout, QInputDialog,
+    QLabel, QMainWindow, QMessageBox, QSizePolicy,
+    QSplitter, QStatusBar, QToolBar, QVBoxLayout, QWidget,
 )
 
 from pixella import __app_name__, __version__
-from pixella.core import ThumbnailCache, ThumbnailWorkerPool, THUMB_DIR, SUPPORTED_EXTS
+from pixella.core import ThumbnailCache, ThumbnailWorkerPool, THUMB_DIR, SUPPORTED_EXTS, AlbumManager
 from pixella.db import (
-    get_session, all_images, all_groups, all_tag_names, all_tag_color_map, all_tags_with_count,
+    get_session, init_db, all_images, all_groups, all_tag_names, all_tag_color_map, all_tags_with_count,
     add_images, images_without_tags, groups_without_tags, create_group, merge_groups, rename_group, dissolve_group,
     remove_image_from_group, set_image_tags, set_group_tags,
-    export_json, import_json, bulk_apply_tag_delta, bulk_apply_group_tag_delta,
-    cleanup_uncolored_orphan_tags,
+    export_json, export_json_combined, import_json,
+    bulk_apply_tag_delta, bulk_apply_group_tag_delta,
+    cleanup_uncolored_orphan_tags, _do_import, _validate_import_json,
 )
 from pixella.db.models import Image, Group, Tag
 from sqlalchemy import select
@@ -36,8 +38,9 @@ from pixella.ui.group_window import GroupWindow
 
 
 class MainWindow(QMainWindow):
-    def __init__(self) -> None:
+    def __init__(self, album_manager: AlbumManager) -> None:
         super().__init__()
+        self._album_manager = album_manager
         self._dark_mode = False
         self._sort_key_name: str = "added"
         self._sort_desc: bool = False
@@ -57,6 +60,7 @@ class MainWindow(QMainWindow):
         self._build_menu()
         self._restore_geometry()
         self._restore_sort()
+        self._init_album_combo()
         self._refresh_grid()
 
     # ------------------------------------------------------------------
@@ -107,6 +111,21 @@ class MainWindow(QMainWindow):
         toolbar = QToolBar("メイン")
         toolbar.setMovable(False)
         self.addToolBar(toolbar)
+
+        # --- アルバムセレクター ---
+        album_container = QWidget()
+        album_layout = QHBoxLayout(album_container)
+        album_layout.setContentsMargins(4, 2, 4, 2)
+        album_layout.setSpacing(4)
+        album_lbl = QLabel("アルバム:")
+        album_layout.addWidget(album_lbl)
+        self._album_combo = QComboBox()
+        self._album_combo.setMinimumWidth(130)
+        self._album_combo.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
+        self._album_combo.setToolTip("アルバムを切り替えます")
+        album_layout.addWidget(self._album_combo)
+        toolbar.addWidget(album_container)
+        toolbar.addSeparator()
 
         self._act_add = QAction("＋ 画像を追加", self)
         self._act_add.setShortcut(QKeySequence("Ctrl+O"))
@@ -209,18 +228,34 @@ class MainWindow(QMainWindow):
 
         file_menu = mb.addMenu("ファイル")
         file_menu.addAction(self._act_add)
-        act_export = QAction("データをJSON書き出し…", self)
-        act_export.setShortcut(QKeySequence("Ctrl+E"))
-        act_export.triggered.connect(self._export_json)
-        file_menu.addAction(act_export)
-        act_import = QAction("JSONからデータを読み込み…", self)
-        act_import.triggered.connect(self._import_json)
-        file_menu.addAction(act_import)
         file_menu.addSeparator()
         act_quit = QAction("終了", self)
         act_quit.setShortcut(QKeySequence("Ctrl+Q"))
         act_quit.triggered.connect(self.close)
         file_menu.addAction(act_quit)
+
+        album_menu = mb.addMenu("アルバム")
+        act_new_album = QAction("新規アルバム…", self)
+        act_new_album.triggered.connect(self._new_album)
+        album_menu.addAction(act_new_album)
+        act_rename_album = QAction("アルバム名変更…", self)
+        act_rename_album.triggered.connect(self._rename_album)
+        album_menu.addAction(act_rename_album)
+        act_delete_album = QAction("アルバムを削除…", self)
+        act_delete_album.triggered.connect(self._delete_album)
+        album_menu.addAction(act_delete_album)
+        album_menu.addSeparator()
+        act_export = QAction("このアルバムをJSONに書き出し…", self)
+        act_export.setShortcut(QKeySequence("Ctrl+E"))
+        act_export.triggered.connect(self._export_json)
+        album_menu.addAction(act_export)
+        act_export_all = QAction("全アルバムをまとめてJSONに書き出し…", self)
+        act_export_all.triggered.connect(self._export_json_combined)
+        album_menu.addAction(act_export_all)
+        album_menu.addSeparator()
+        act_import = QAction("JSONからデータを読み込み…", self)
+        act_import.triggered.connect(self._import_json)
+        album_menu.addAction(act_import)
 
         view_menu = mb.addMenu("表示")
         view_menu.addAction(self._act_theme)
@@ -272,6 +307,94 @@ class MainWindow(QMainWindow):
         return [item for _, item in merged]
 
     # ------------------------------------------------------------------
+    # Album management
+    # ------------------------------------------------------------------
+
+    def _init_album_combo(self) -> None:
+        """コンボボックスをアルバムリストで初期化し、シグナルを接続する。"""
+        self._album_combo.blockSignals(True)
+        self._album_combo.clear()
+        for name in self._album_manager.album_names:
+            self._album_combo.addItem(name)
+        idx = self._album_combo.findText(self._album_manager.active_name)
+        if idx >= 0:
+            self._album_combo.setCurrentIndex(idx)
+        self._album_combo.blockSignals(False)
+        self._album_combo.currentTextChanged.connect(self._on_album_changed)
+
+    def _update_album_combo(self) -> None:
+        """アルバムリスト変更後にコンボボックスを再構築する。"""
+        self._album_combo.blockSignals(True)
+        self._album_combo.clear()
+        for name in self._album_manager.album_names:
+            self._album_combo.addItem(name)
+        idx = self._album_combo.findText(self._album_manager.active_name)
+        if idx >= 0:
+            self._album_combo.setCurrentIndex(idx)
+        self._album_combo.blockSignals(False)
+
+    def _on_album_changed(self, name: str) -> None:
+        """コンボボックスでアルバムが切り替えられたとき。"""
+        if not name or name == self._album_manager.active_name:
+            return
+        self._album_manager.set_active(name)
+        init_db(self._album_manager.active_db_path())
+        self._refresh_grid()
+
+    def _new_album(self) -> None:
+        name, ok = QInputDialog.getText(self, "新規アルバム", "アルバム名:")
+        if not ok or not name.strip():
+            return
+        try:
+            db_path = self._album_manager.create_album(name.strip())
+        except ValueError as e:
+            QMessageBox.warning(self, "エラー", str(e))
+            return
+        # 新規 DB を初期化（空のテーブルを作成）
+        init_db(db_path)
+        # アクティブに切り替え
+        self._album_manager.set_active(name.strip())
+        init_db(self._album_manager.active_db_path())
+        self._update_album_combo()
+        self._refresh_grid()
+
+    def _rename_album(self) -> None:
+        current = self._album_manager.active_name
+        new_name, ok = QInputDialog.getText(
+            self, "アルバム名変更", "新しい名前:", text=current
+        )
+        if not ok or not new_name.strip():
+            return
+        try:
+            self._album_manager.rename_album(current, new_name.strip())
+        except ValueError as e:
+            QMessageBox.warning(self, "エラー", str(e))
+            return
+        self._update_album_combo()
+        self._refresh_grid()
+
+    def _delete_album(self) -> None:
+        current = self._album_manager.active_name
+        if len(self._album_manager.album_names) <= 1:
+            QMessageBox.information(self, "削除不可", "最後のアルバムは削除できません。")
+            return
+        reply = QMessageBox.warning(
+            self, "アルバムを削除",
+            f"アルバム「{current}」を削除します。\n"
+            "このアルバム内のデータ（画像管理情報・タグ）はすべて失われます。\n"
+            "元のファイルは削除されません。続行しますか？",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+        self._album_manager.delete_album(current)
+        # 新しいアクティブアルバムのDBに切り替え
+        init_db(self._album_manager.active_db_path())
+        self._update_album_combo()
+        self._refresh_grid()
+
+    # ------------------------------------------------------------------
     # Tag manager
     # ------------------------------------------------------------------
 
@@ -303,7 +426,8 @@ class MainWindow(QMainWindow):
     def _refresh_grid(self) -> None:
         self._view_mode = "home"
         self._breadcrumb.set_home()
-        self.setWindowTitle(f"{__app_name__} {__version__}")
+        album = self._album_manager.active_name
+        self.setWindowTitle(f"{__app_name__} {__version__}  —  {album}")
         with get_session() as session:
             self._cached_images = all_images(session)
             self._cached_groups = all_groups(session)
@@ -886,16 +1010,38 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------------
 
     def _export_json(self) -> None:
+        """アクティブなアルバムのデータをJSONに書き出す。"""
         last_dir = self._settings().value("json_last_dir", "")
-        default_path = str(Path(last_dir) / "pixella_export.json") if last_dir else "pixella_export.json"
+        album = self._album_manager.active_name
+        safe_name = "".join(c if c.isalnum() or c in "-_ " else "_" for c in album)
+        default_name = f"pixella_{safe_name}.json"
+        default_path = str(Path(last_dir) / default_name) if last_dir else default_name
         path, _ = QFileDialog.getSaveFileName(
-            self, "JSONに書き出し", default_path, "JSON (*.json)"
+            self, f"「{album}」をJSONに書き出し", default_path, "JSON (*.json)"
         )
         if path:
             self._settings().setValue("json_last_dir", str(Path(path).parent))
             with get_session() as session:
                 export_json(session, path)
             self._status.showMessage(f"書き出し完了: {path}", 5000)
+
+    def _export_json_combined(self) -> None:
+        """全アルバムをまとめて1つのJSONに書き出す。"""
+        last_dir = self._settings().value("json_last_dir", "")
+        default_path = str(Path(last_dir) / "pixella_all_albums.json") if last_dir else "pixella_all_albums.json"
+        path, _ = QFileDialog.getSaveFileName(
+            self, "全アルバムをJSONに書き出し", default_path, "JSON (*.json)"
+        )
+        if not path:
+            return
+        self._settings().setValue("json_last_dir", str(Path(path).parent))
+        try:
+            export_json_combined(self._album_manager.all_db_paths(), path)
+        except Exception as e:
+            QMessageBox.critical(self, "書き出しエラー", f"書き出しに失敗しました:\n{e}")
+            return
+        n = len(self._album_manager.album_names)
+        self._status.showMessage(f"全 {n} アルバムを書き出し完了: {path}", 5000)
 
     def _import_json(self) -> None:
         last_dir = self._settings().value("json_last_dir", "")
@@ -905,24 +1051,34 @@ class MainWindow(QMainWindow):
         if not path:
             return
         self._settings().setValue("json_last_dir", str(Path(path).parent))
-        # バリデーション
+        # JSONを読み込んでフォーマットを判定
         try:
             import json as _json
             raw = Path(path).read_text(encoding="utf-8")
             data = _json.loads(raw)
-            from pixella.db.repository import _validate_import_json
+        except Exception as e:
+            QMessageBox.critical(self, "読み込みエラー", f"JSONのパースに失敗しました:\n{e}")
+            return
+
+        # マルチアルバム形式かどうかを判定
+        if data.get("format") == "pixella_multi_album":
+            self._import_json_multi(data)
+            return
+
+        # 単一アルバム形式（従来互換）
+        try:
             _validate_import_json(data)
         except Exception as e:
             QMessageBox.critical(self, "読み込みエラー", f"JSONの検証に失敗しました:\n{e}")
             return
-        # 確認ダイアログ
         n_images = len(data.get("images", []))
         n_groups = len(data.get("groups", []))
         n_tags   = len(data.get("tags", []))
         reply = QMessageBox.warning(
             self,
             "データの読み込み確認",
-            f"現在のデータはすべて削除されます。本当に読み込みますか？\n\n"
+            f"アルバム「{self._album_manager.active_name}」の現在のデータはすべて削除されます。\n"
+            f"本当に読み込みますか？\n\n"
             f"読み込む内容: 画像 {n_images} 件 / グループ {n_groups} 件 / タグ {n_tags} 件",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             QMessageBox.StandardButton.No,
@@ -936,3 +1092,74 @@ class MainWindow(QMainWindow):
             return
         self._refresh_grid()
         QMessageBox.information(self, "読み込み完了", f"読み込みました:\n{path}")
+
+    def _import_json_multi(self, data: dict) -> None:
+        """マルチアルバム形式JSONのインポート処理。"""
+        albums_data = data.get("albums", [])
+        if not albums_data:
+            QMessageBox.warning(self, "読み込みエラー", "アルバムデータが空です。")
+            return
+
+        names = [a.get("name", f"アルバム {i+1}") for i, a in enumerate(albums_data)]
+        names_str = "\n".join(f"  • {n}" for n in names)
+        reply = QMessageBox.warning(
+            self,
+            "マルチアルバム読み込み",
+            f"{len(albums_data)} 件のアルバムを読み込みます:\n{names_str}\n\n"
+            "同名のアルバムが存在する場合はデータが上書きされます。\n"
+            "新しいアルバム名は自動的に作成されます。続行しますか？",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+
+        original_active = self._album_manager.active_name
+        errors: list[str] = []
+
+        for album_data in albums_data:
+            name = album_data.get("name", "インポートアルバム")
+            try:
+                _validate_import_json(album_data)
+            except ValueError as e:
+                errors.append(f"「{name}」のバリデーションエラー: {e}")
+                continue
+            # アルバムが存在しなければ作成
+            try:
+                db_path = self._album_manager.get_db_path(name)
+            except KeyError:
+                try:
+                    db_path = self._album_manager.create_album(name)
+                except ValueError as e:
+                    errors.append(f"「{name}」の作成エラー: {e}")
+                    continue
+            # 対象アルバムのDBを初期化してインポート
+            init_db(db_path)
+            try:
+                with get_session() as session:
+                    _do_import(session, album_data)
+            except Exception as e:
+                errors.append(f"「{name}」のインポートエラー: {e}")
+
+        # アクティブアルバムのDBに戻す
+        try:
+            init_db(self._album_manager.active_db_path())
+        except KeyError:
+            # アクティブアルバムが消えていた場合は先頭へ
+            self._album_manager.set_active(self._album_manager.album_names[0])
+            init_db(self._album_manager.active_db_path())
+
+        self._update_album_combo()
+        self._refresh_grid()
+
+        if errors:
+            QMessageBox.warning(
+                self, "一部エラーあり",
+                f"{len(albums_data) - len(errors)} 件成功, {len(errors)} 件失敗:\n" +
+                "\n".join(errors)
+            )
+        else:
+            QMessageBox.information(
+                self, "読み込み完了",
+                f"{len(albums_data)} 件のアルバムを読み込みました。"
+            )
