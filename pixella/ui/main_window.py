@@ -78,10 +78,22 @@ class MainWindow(QMainWindow):
         else:
             self.resize(1200, 760)
 
+    def _sort_prefix(self) -> str:
+        """現在のアルバムに対応する QSettings キーのプレフィックスを返す。"""
+        return f"sort_album/{self._album_manager.active_db_key()}"
+
+    def _save_sort(self) -> None:
+        """現在のアルバムのソート設定を QSettings に保存する。"""
+        s = self._settings()
+        prefix = self._sort_prefix()
+        s.setValue(f"{prefix}/key",  self._sort_key_name)
+        s.setValue(f"{prefix}/desc", self._sort_desc)
+
     def _restore_sort(self) -> None:
         s = self._settings()
-        key  = s.value("sort/key",  "added")
-        desc = s.value("sort/desc", False)
+        prefix = self._sort_prefix()
+        key  = s.value(f"{prefix}/key",  "added")
+        desc = s.value(f"{prefix}/desc", False)
         # QSettings は文字列で返る場合があるので bool に変換
         if isinstance(desc, str):
             desc = desc.lower() == "true"
@@ -98,8 +110,7 @@ class MainWindow(QMainWindow):
     def closeEvent(self, event) -> None:  # type: ignore[override]
         s = self._settings()
         s.setValue("window/geometry", self.saveGeometry())
-        s.setValue("sort/key",  self._sort_key_name)
-        s.setValue("sort/desc", self._sort_desc)
+        self._save_sort()
         super().closeEvent(event)
 
     # ------------------------------------------------------------------
@@ -278,6 +289,7 @@ class MainWindow(QMainWindow):
     def _on_sort_changed(self, key: str, desc: bool) -> None:
         self._sort_key_name = key
         self._sort_desc = desc
+        self._save_sort()
         self._reload_display()
 
     def _get_img_sort_key(self, img: Image):
@@ -342,8 +354,10 @@ class MainWindow(QMainWindow):
         """コンボボックスでアルバムが切り替えられたとき。"""
         if not name or name == self._album_manager.active_name:
             return
+        self._save_sort()  # 切り替え前のアルバムのソート設定を保存
         self._album_manager.set_active(name)
         init_db(self._album_manager.active_db_path())
+        self._restore_sort()  # 新しいアルバムのソート設定を復元
         self._refresh_grid()
 
     def _new_album(self) -> None:

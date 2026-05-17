@@ -108,6 +108,16 @@ class AlbumManager:
     def active_db_path(self) -> Path:
         return self.get_db_path(self._active_name)
 
+    def active_db_key(self) -> str:
+        """QSettings キー用のアルバム識別子（UUIDベース）を返す。
+        アルバム名を直接キーにすると '/' 等の特殊文字が問題になるため、
+        db_file 名（UUID hex）を使用する。
+        """
+        for a in self._albums:
+            if a.name == self._active_name:
+                return a.db_file.removesuffix(".db")
+        return "default"
+
     # ------------------------------------------------------------------
     # Album CRUD
     # ------------------------------------------------------------------
