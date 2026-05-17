@@ -115,16 +115,17 @@ def cleanup_uncolored_orphan_tags(session: Session, tag_names: list[str]) -> Non
 
 def add_image(path: str | Path) -> Image:
     with get_session() as session:
+        norm = os.path.normpath(str(path))
         existing = session.execute(
-            select(Image).where(Image.path == str(path))
+            select(Image).where(Image.path == norm)
         ).scalar_one_or_none()
         if existing:
             return existing
         try:
-            ct = os.path.getctime(str(path))
+            ct = os.path.getctime(norm)
         except OSError:
             ct = 0.0
-        img = Image(path=str(path), ctime=ct)
+        img = Image(path=norm, ctime=ct)
         session.add(img)
         session.commit()
         session.refresh(img)
@@ -137,17 +138,18 @@ def add_images(paths: list[str | Path]) -> tuple[int, int]:
     skipped = 0
     with get_session() as session:
         for p in paths:
+            norm = os.path.normpath(str(p))
             existing = session.execute(
-                select(Image).where(Image.path == str(p))
+                select(Image).where(Image.path == norm)
             ).scalar_one_or_none()
             if existing:
                 skipped += 1
             else:
                 try:
-                    ct = os.path.getctime(str(p))
+                    ct = os.path.getctime(norm)
                 except OSError:
                     ct = 0.0
-                img = Image(path=str(p), ctime=ct)
+                img = Image(path=norm, ctime=ct)
                 session.add(img)
                 added += 1
         session.commit()
