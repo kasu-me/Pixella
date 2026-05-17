@@ -159,6 +159,11 @@ class MainWindow(QMainWindow):
         self._act_remove.triggered.connect(self._remove_selected)
         toolbar.addAction(self._act_remove)
 
+        self._act_regen_thumb = QAction("🔄 サムネイル再生成", self)
+        self._act_regen_thumb.setEnabled(False)
+        self._act_regen_thumb.triggered.connect(self._regen_selected_thumbs)
+        toolbar.addAction(self._act_regen_thumb)
+
         toolbar.addSeparator()
 
         self._act_theme = QAction("🌙 ダークモード", self)
@@ -547,6 +552,25 @@ class MainWindow(QMainWindow):
         self._refresh_current_view()
 
     # ------------------------------------------------------------------
+    # Thumbnail regeneration
+    # ------------------------------------------------------------------
+
+    def _regen_selected_thumbs(self) -> None:
+        selected = self._grid.selected_items_data()
+        if not selected:
+            return
+        # 対象となる画像を収集（Image直接 + Groupのカバー画像）
+        images_to_regen: list[Image] = []
+        for item in selected:
+            if isinstance(item, Image):
+                images_to_regen.append(item)
+            elif isinstance(item, Group) and item.cover_image:
+                images_to_regen.append(item.cover_image)
+        for img in images_to_regen:
+            self._cache.invalidate(img.path)
+            self._pool.request(img.id, img.path, self._grid.update_thumb)
+
+    # ------------------------------------------------------------------
     # Remove
     # ------------------------------------------------------------------
 
@@ -635,6 +659,7 @@ class MainWindow(QMainWindow):
         self._act_merge.setEnabled(can_merge)
         self._act_dissolve.setEnabled(has_groups)
         self._act_remove.setEnabled(bool(items))
+        self._act_regen_thumb.setEnabled(bool(items))
 
         if len(items) == 1:
             item = items[0]
