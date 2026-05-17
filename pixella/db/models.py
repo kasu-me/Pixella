@@ -122,6 +122,7 @@ def init_db(db_path: str | Path) -> None:
     _SessionLocal = sessionmaker(bind=engine, expire_on_commit=False)
     _backfill_ctime()
     _normalize_backslash_paths()
+    _migrate_group_image_tags()
 
 
 def get_session() -> Session:
@@ -168,5 +169,42 @@ def _backfill_ctime() -> None:
         session.execute(
             text("UPDATE images SET ctime = :ctime WHERE id = :id"),
             updates,
+        )
+        session.commit()
+
+
+def _migrate_group_image_tags() -> None:
+    """グループ内画像に残存するタグをグループ側に移行し、画像からは除去する。
+
+    過去仕様の名残で image_tag にグループ所属画像のタグが残っている場合に
+    一度だけ実行される起動時クリーンアップ。
+    """
+    from sqlalchemy import text
+    with _SessionLocal() as session:
+        # グループに所属し、かつタグを持つ画像のタグ情報を取得
+        rows = session.execute(
+            text(
+                "SELECT it.image_id, i.group_id, it.tag_id "
+                "FROM image_tag it "
+                "JOIN images i ON i.id = it.image_id "
+                "WHERE i.group_id IS NOT NULL"
+            )
+        ).fetchall()
+        if not rows:
+            return
+        # group_tag に挿入（既存の組み合わせは無視）
+        group_tag_pairs = list({(row[1], row[2]) for row in rows})
+        session.execute(
+            text("INSERT OR IGNORE INTO group_tag (group_id, tag_id) VALUES (:group_id, :tag_id)"),
+            [{"group_id": gid, "tag_id": tid} for gid, tid in group_tag_pairs],
+        )
+        # image_tag から対象行を削除
+        image_ids = list({row[0] for row in rows})
+        session.execute(
+            text(
+                "DELETE FROM image_tag WHERE image_id IN ("
+                + ",".join(str(iid) for iid in image_ids)
+                + ")"
+            )
         )
         session.commit()
