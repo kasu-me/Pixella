@@ -358,6 +358,7 @@ class MainWindow(QMainWindow):
         self._album_manager.set_active(name)
         init_db(self._album_manager.active_db_path())
         self._restore_sort()  # 新しいアルバムのソート設定を復元
+        self._search_bar.set_text("")  # 検索条件をリセット
         self._refresh_grid()
 
     def _new_album(self) -> None:
