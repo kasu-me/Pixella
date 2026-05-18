@@ -1,7 +1,7 @@
 """Tag input widget with autocomplete."""
 from __future__ import annotations
 
-from PySide6.QtCore import Qt, QEvent, QPoint, QTimer, Signal
+from PySide6.QtCore import Qt, QPoint, QTimer, Signal
 from PySide6.QtWidgets import (
     QHBoxLayout, QLabel, QLineEdit, QListWidget, QMessageBox,
     QSizePolicy, QVBoxLayout, QWidget,
@@ -98,8 +98,8 @@ class _TagLineEdit(QLineEdit):
 
     動作フロー:
     - 文字入力 (ASCII)     : keyPressEvent → super() → _update_popup()
-    - IME プリエディット   : inputMethodEvent → super() → _update_popup(preedit)
-    - IME 確定             : inputMethodEvent → super() (text 更新) → _update_popup("")
+    - IME プリエディット   : inputMethodEvent → super() → popup 更新を抑止
+    - IME 確定             : inputMethodEvent → super() (text 更新) → _update_popup()
     - ↓/↑ キー            : popup.navigate() を直接呼び出し (super 呼ばず)
     - Enter (候補選択中)   : suggestion_confirmed を emit して確定
     - Enter (候補未選択)   : popup を閉じて returnPressed を発火させる
@@ -115,6 +115,8 @@ class _TagLineEdit(QLineEdit):
         # 現在の IME プリエディット文字列を追跡する。
         # inputMethodEvent で更新し、Up/Down キー即時表示やフォールバック更新に使用する。
         self._current_preedit: str = ""
+        # singleShot で積まれた古い更新要求を無効化するための世代トークン。
+        self._popup_update_token: int = 0
         # 確定済みテキストが変化したときにポップアップを更新する。
         # textEdited はユーザー操作でテキストが実際に変化したときのみ発火するため、
         # プリエディット中に誤って hide() が呼ばれる問題が起きにくい。
@@ -135,12 +137,12 @@ class _TagLineEdit(QLineEdit):
         self.clear()
         self.suggestion_confirmed.emit(text)
 
-    def _update_popup(self, extra_preedit: str = "") -> None:
+    def _update_popup(self) -> None:
         """
-        現在の入力テキスト + IME プリエディットを合わせてポップアップを更新する。
-        extra_preedit は inputMethodEvent から渡される現在のプリエディット文字列。
+        現在の確定済み入力テキストに基づいてポップアップを更新する。
+        プリエディット中は inputMethodEvent 側で更新自体を抑止する。
         """
-        raw = (self.text() + extra_preedit).strip()
+        raw = self.text().strip()
         query = raw.lower()
 
         if not query:
@@ -163,7 +165,7 @@ class _TagLineEdit(QLineEdit):
             popup.setCurrentRow(matches.index(prev_selected))
         popup.show_popup()
 
-    def _schedule_update_popup(self, preedit: str = "") -> None:
+    def _schedule_update_popup(self) -> None:
         """
         ポップアップ更新を次のイベントループ処理まで遅延させる。
 
@@ -173,16 +175,35 @@ class _TagLineEdit(QLineEdit):
         QTimer.singleShot(0) で遅延することで、呼び出し元のイベントハンドラが
         完全に返った後にポップアップ更新が実行されるよう保証する。
         """
-        QTimer.singleShot(0, lambda: self._update_popup(preedit))
+        self._popup_update_token += 1
+        token = self._popup_update_token
+        QTimer.singleShot(0, lambda: self._run_scheduled_popup_update(token))
+
+    def _run_scheduled_popup_update(self, token: int) -> None:
+        """最新世代の要求のみ実行し、プリエディット中はポップアップ更新を抑止する。"""
+        if token != self._popup_update_token:
+            return
+        if self._current_preedit:
+            return
+        self._update_popup()
 
     def focusInEvent(self, event: QFocusEvent) -> None:
-        # Qt の QLineEdit::focusInEvent は TabFocusReason / ActiveWindowFocusReason 時に
-        # selectAll() を呼び出す。タグ入力欄では既存テキストを全選択する必要がない
-        # (全選択中に IME commitString が来ると既存テキストが消える)。
-        # すべてのフォーカスイベントを OtherFocusReason に差し替えて super() に渡すことで
-        # selectAll() 自体を呼び出させない。
-        neutral = QFocusEvent(QEvent.Type.FocusIn, Qt.FocusReason.OtherFocusReason)
-        super().focusInEvent(neutral)
+        # フォーカスイベント自体は改変せずに Qt 標準処理へ渡す。
+        # Windows IME では合成イベントを渡すと入力コンテキスト初期化と競合し、
+        # 先頭キーが取りこぼされることがある。
+        super().focusInEvent(event)
+
+        # 既存テキストの自動全選択だけを後段で打ち消す。
+        # これにより「IME commitString が全選択を置換する」問題を避けつつ、
+        # フォーカス遷移の文脈は維持する。
+        if event.reason() in (
+            Qt.FocusReason.TabFocusReason,
+            Qt.FocusReason.BacktabFocusReason,
+            Qt.FocusReason.ShortcutFocusReason,
+            Qt.FocusReason.ActiveWindowFocusReason,
+        ) and self.hasSelectedText():
+            self.deselect()
+            self.setCursorPosition(len(self.text()))
 
     def keyPressEvent(self, event: QKeyEvent) -> None:
         popup = self._popup
@@ -194,9 +215,9 @@ class _TagLineEdit(QLineEdit):
         # ポップアップが非表示でもテキスト/プリエディットがあれば即座に表示する。
         if key in (Qt.Key.Key_Down, Qt.Key.Key_Up):
             if not popup or not popup.isVisible():
-                raw = (self.text() + self._current_preedit).strip()
-                if raw:
-                    self._update_popup(self._current_preedit)
+                raw = self.text().strip()
+                if raw and not self._current_preedit:
+                    self._update_popup()
                     popup = self._popup
             if popup and popup.isVisible():
                 popup.navigate(+1 if key == Qt.Key.Key_Down else -1)
@@ -237,13 +258,22 @@ class _TagLineEdit(QLineEdit):
         # プリエディット状態を更新する。
         # keyPressEvent の Up/Down 即時表示判定や IME フォールバック更新で参照する。
         self._current_preedit = preedit
-        # IME プリエディット中もポップアップを遅延更新する。
-        # super() 呼び出し後、self.text() は確定済みテキストのみを含む。
-        # preedit を lambda でキャプチャして正しい文字列を渡す。
-        self._schedule_update_popup(preedit)
+
+        # IME プリエディット中はポップアップを更新しない。
+        # Windows IME 英数モードではこのタイミングでトップレベル popup を show すると
+        # プリエディットがキャンセルされ、先頭文字が欠落するケースがある。
+        if preedit:
+            self._popup_update_token += 1  # 既に積まれた更新要求を無効化
+            if self._popup:
+                self._popup.hide()
+            return
+
+        # preedit が空になった（確定済み）タイミングでのみ更新する。
+        self._schedule_update_popup()
 
     def focusOutEvent(self, event) -> None:
         super().focusOutEvent(event)
+        self._popup_update_token += 1
         # フォーカスが外れたらポップアップを閉じる。
         # _CompletionPopup は NoFocus なのでポップアップクリックではここは呼ばれない。
         if self._popup:
@@ -251,6 +281,7 @@ class _TagLineEdit(QLineEdit):
 
     def hideEvent(self, event) -> None:
         super().hideEvent(event)
+        self._popup_update_token += 1
         if self._popup:
             self._popup.hide()
 
