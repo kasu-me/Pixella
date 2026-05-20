@@ -14,7 +14,7 @@ from PySide6.QtWidgets import (
 )
 
 from pixella import __app_name__, __version__
-from pixella.core import ThumbnailCache, ThumbnailWorkerPool, THUMB_DIR, SUPPORTED_EXTS, AlbumManager
+from pixella.core import ThumbnailCache, ThumbnailWorkerPool, THUMB_DIR, SUPPORTED_EXTS, AlbumManager, natural_sort_key
 from pixella.db import (
     get_session, init_db, all_images, all_groups, all_tag_names, all_tag_color_map, all_tags_with_count,
     add_images, images_without_tags, groups_without_tags, create_group, merge_groups, rename_group, dissolve_group,
@@ -298,7 +298,7 @@ class MainWindow(QMainWindow):
         elif self._sort_key_name == "created":
             return img.ctime or 0.0
         else:  # "name"
-            return img.filename.lower()
+            return natural_sort_key(img.filename)
 
     def _get_grp_sort_key(self, grp: Group):
         if not grp.images:
@@ -307,7 +307,7 @@ class MainWindow(QMainWindow):
             elif self._sort_key_name == "created":
                 return 0.0
             else:
-                return ""
+                return natural_sort_key("")
         vals = [self._get_img_sort_key(img) for img in grp.images]
         # 降順の場合グループ内一番は max、昇順は min
         return max(vals) if self._sort_desc else min(vals)
@@ -646,7 +646,7 @@ class MainWindow(QMainWindow):
             ).scalar_one_or_none()
         if fresh is None:
             return
-        win = GroupWindow(fresh, self._pool, parent=self)
+        win = GroupWindow(fresh, self._pool, sort_key=self._sort_key_name, sort_desc=self._sort_desc, parent=self)
         win.destroyed.connect(lambda _o, gid=group.id: self._group_windows.pop(gid, None))
         self._group_windows[group.id] = win
         win.show()
