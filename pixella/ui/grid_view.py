@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Union
 
 from PySide6.QtCore import Qt, Signal, QSize, QMimeData, QPoint, QUrl
-from PySide6.QtGui import QPixmap, QIcon, QDrag, QPainter, QColor, QFont, QDesktopServices, QWheelEvent
+from PySide6.QtGui import QPixmap, QIcon, QDrag, QPainter, QColor, QFont, QFontMetrics, QDesktopServices, QWheelEvent
 from PySide6.QtWidgets import (
     QAbstractItemView, QListWidget, QListWidgetItem, QSizePolicy,
     QStyledItemDelegate,
@@ -23,6 +23,8 @@ GridItem = Union[Image, Group]
 
 # カスタムデータロール — タグの色リストを格納
 TAG_COLORS_ROLE = Qt.ItemDataRole.UserRole + 1
+# カスタムデータロール — グループ内画像枚数を格納
+COUNT_ROLE = Qt.ItemDataRole.UserRole + 2
 
 _CHIP_D   = 12   # チップ直径 (px)
 _CHIP_GAP = 3    # チップ間隔
@@ -72,6 +74,29 @@ class _TagChipDelegate(QStyledItemDelegate):
             cx += _CHIP_D + _CHIP_GAP
 
         painter.restore()
+
+        # グループ画像枚数バッジ（左上）
+        count: int | None = index.data(COUNT_ROLE)
+        if count is not None:
+            text = f"{count}枚"
+            font2 = QFont()
+            font2.setPointSize(9)
+            font2.setBold(True)
+            fm = QFontMetrics(font2)
+            pad_x, pad_y = 6, 3
+            badge_w = fm.horizontalAdvance(text) + pad_x * 2
+            badge_h = fm.height() + pad_y * 2
+            bx = r.left() + 4
+            by = r.top() + 4
+            painter.save()
+            painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(QColor(0, 0, 0, 140))
+            painter.drawRoundedRect(bx, by, badge_w, badge_h, 4, 4)
+            painter.setFont(font2)
+            painter.setPen(QColor("white"))
+            painter.drawText(bx, by, badge_w, badge_h, Qt.AlignmentFlag.AlignCenter, text)
+            painter.restore()
 
 
 def _group_badge_pixmap(base: QPixmap) -> QPixmap:
@@ -202,6 +227,8 @@ class ThumbnailGridWidget(QListWidget):
             # ここを更新しないと色変更時にチップが古い状態に戻る。
             lw_item.setData(Qt.ItemDataRole.UserRole, data)
             lw_item.setData(TAG_COLORS_ROLE, [t.color for t in data.tags])
+            if isinstance(data, Group):
+                lw_item.setData(COUNT_ROLE, len(data.images))
             self.update(self.indexFromItem(lw_item))
 
     def update_tag_colors(self, color_map: dict[str, str | None]) -> None:
@@ -235,6 +262,8 @@ class ThumbnailGridWidget(QListWidget):
         lw_item = QListWidgetItem(QIcon(self._placeholder), label)
         lw_item.setData(Qt.ItemDataRole.UserRole, data)
         lw_item.setData(TAG_COLORS_ROLE, [t.color for t in data.tags])
+        if isinstance(data, Group):
+            lw_item.setData(COUNT_ROLE, len(data.images))
         lw_item.setSizeHint(QSize(ITEM_SIZE, ITEM_SIZE + 24))
         self.addItem(lw_item)
         self._id_to_item[key] = lw_item
