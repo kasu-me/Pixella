@@ -150,7 +150,8 @@ class _TagLineEdit(QLineEdit):
                 self._popup.hide()
             return
 
-        matches = sorted(t for t in self._all_tags if query in t.lower())[:_MAX_SUGGESTIONS]
+        matched = [t for t in self._all_tags if query in t.lower()]
+        matches = sorted(matched, key=lambda t: (not t.lower().startswith(query), t.lower()))[:_MAX_SUGGESTIONS]
         if not matches:
             if self._popup:
                 self._popup.hide()
