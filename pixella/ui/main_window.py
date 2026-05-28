@@ -29,7 +29,7 @@ from sqlalchemy.orm import selectinload
 from pixella.ui.grid_view import ThumbnailGridWidget
 from pixella.ui.detail_panel import DetailPanel
 from pixella.ui.search_bar import SearchBar
-from pixella.ui.dialogs import GroupDialog
+from pixella.ui.dialogs import GroupDialog, RegexInputDialog, RegexGroupPreviewDialog
 from pixella.ui.themes import apply_theme
 from pixella.ui.breadcrumb import BreadcrumbBar
 from pixella.ui.sort_bar import SortBar
@@ -150,6 +150,11 @@ class MainWindow(QMainWindow):
         self._act_group.setEnabled(False)
         self._act_group.triggered.connect(self._on_group_action)
         toolbar.addAction(self._act_group)
+
+        self._act_regex_group = QAction("🔍 正規表現グループ化", self)
+        self._act_regex_group.setToolTip("正規表現でファイル名を指定してグループ化します")
+        self._act_regex_group.triggered.connect(self._on_regex_group_action)
+        toolbar.addAction(self._act_regex_group)
 
         self._act_dissolve = QAction("グループ解除", self)
         self._act_dissolve.setEnabled(False)
@@ -545,6 +550,62 @@ class MainWindow(QMainWindow):
             )
             session.commit()
         self._refresh_current_view()
+
+    def _on_regex_group_action(self) -> None:
+        """正規表現でファイル名を指定してグループ化する。"""
+        import re
+
+        last_pattern = ""
+        while True:
+            # ステップ 2-4: 正規表現入力
+            input_dlg = RegexInputDialog(default_pattern=last_pattern, parent=self)
+            if input_dlg.exec() != RegexInputDialog.DialogCode.Accepted:
+                return
+
+            pattern = input_dlg.pattern
+            last_pattern = pattern  # エラー時も入力値を次回に引き継ぐ
+
+            if not pattern:
+                QMessageBox.warning(self, "正規表現グループ化", "正規表現を入力してください。")
+                continue
+
+            try:
+                rx = re.compile(pattern)
+            except re.error as e:
+                QMessageBox.warning(self, "正規表現エラー", f"正規表現が不正です:\n{e}")
+                continue
+
+            # グループ化されていない画像に絞ってマッチング
+            ungrouped = [img for img in self._cached_images if img.group_id is None]
+            matched = [img for img in ungrouped if rx.search(img.filename)]
+
+            if not matched:
+                QMessageBox.information(
+                    self, "該当なし",
+                    "条件に合致する未グループ化の画像が見つかりませんでした。\n"
+                    "正規表現を変更してください。",
+                )
+                continue  # ステップ 2 に戻る
+
+            # ステップ 5-6: マッチ結果確認・グループ化
+            while True:
+                preview_dlg = RegexGroupPreviewDialog(matched, self._pool, parent=self)
+                if preview_dlg.exec() != RegexGroupPreviewDialog.DialogCode.Accepted:
+                    return  # キャンセル → グループ化しない
+
+                selected_images = preview_dlg.selected_images
+                if len(selected_images) < 2:
+                    QMessageBox.information(
+                        self, "グループ化",
+                        "グループ化するには 2 枚以上の画像を選択してください。",
+                    )
+                    continue
+
+                with get_session() as session:
+                    create_group(session, preview_dlg.group_name, [img.id for img in selected_images])
+                    session.commit()
+                self._refresh_current_view()
+                return
 
     def _dissolve_group(self) -> None:
         selected = self._grid.selected_items_data()
