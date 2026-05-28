@@ -41,11 +41,37 @@ class _TagChipDelegate(QStyledItemDelegate):
 
     def paint(self, painter, option, index) -> None:  # type: ignore[override]
         super().paint(painter, option, index)
+
+        r = option.rect
+
+        # グループ画像枚数バッジ（左上）— タグの有無に関わらず描画
+        count: int | None = index.data(COUNT_ROLE)
+        if count is not None:
+            text = f"{count}枚"
+            font2 = QFont()
+            font2.setPointSize(9)
+            font2.setBold(True)
+            fm = QFontMetrics(font2)
+            pad_x, pad_y = 6, 3
+            badge_w = fm.horizontalAdvance(text) + pad_x * 2
+            badge_h = fm.height() + pad_y * 2
+            bx = r.left() + 4
+            by = r.top() + 4
+            painter.save()
+            painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(QColor(0, 0, 0, 140))
+            painter.drawRoundedRect(bx, by, badge_w, badge_h, 4, 4)
+            painter.setFont(font2)
+            painter.setPen(QColor("white"))
+            painter.drawText(bx, by, badge_w, badge_h, Qt.AlignmentFlag.AlignCenter, text)
+            painter.restore()
+
+        # タグ色チップ（左下）— タグがある場合のみ描画
         colors: list[str | None] | None = index.data(TAG_COLORS_ROLE)
         if not colors:
             return
 
-        r = option.rect
         n = min(len(colors), _CHIP_MAX)
         content_w = n * _CHIP_D + (n - 1) * _CHIP_GAP
         total_w   = content_w + _CHIP_PAD * 2
@@ -74,29 +100,6 @@ class _TagChipDelegate(QStyledItemDelegate):
             cx += _CHIP_D + _CHIP_GAP
 
         painter.restore()
-
-        # グループ画像枚数バッジ（左上）
-        count: int | None = index.data(COUNT_ROLE)
-        if count is not None:
-            text = f"{count}枚"
-            font2 = QFont()
-            font2.setPointSize(9)
-            font2.setBold(True)
-            fm = QFontMetrics(font2)
-            pad_x, pad_y = 6, 3
-            badge_w = fm.horizontalAdvance(text) + pad_x * 2
-            badge_h = fm.height() + pad_y * 2
-            bx = r.left() + 4
-            by = r.top() + 4
-            painter.save()
-            painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
-            painter.setPen(Qt.PenStyle.NoPen)
-            painter.setBrush(QColor(0, 0, 0, 140))
-            painter.drawRoundedRect(bx, by, badge_w, badge_h, 4, 4)
-            painter.setFont(font2)
-            painter.setPen(QColor("white"))
-            painter.drawText(bx, by, badge_w, badge_h, Qt.AlignmentFlag.AlignCenter, text)
-            painter.restore()
 
 
 def _group_badge_pixmap(base: QPixmap) -> QPixmap:
