@@ -148,14 +148,8 @@ class MainWindow(QMainWindow):
         self._act_group = QAction("⊞ グループ化", self)
         self._act_group.setShortcut(QKeySequence("Ctrl+G"))
         self._act_group.setEnabled(False)
-        self._act_group.triggered.connect(self._create_group)
+        self._act_group.triggered.connect(self._on_group_action)
         toolbar.addAction(self._act_group)
-
-        self._act_merge = QAction("⊞ グループ結合", self)
-        self._act_merge.setShortcut(QKeySequence("Ctrl+M"))
-        self._act_merge.setEnabled(False)
-        self._act_merge.triggered.connect(self._merge_groups)
-        toolbar.addAction(self._act_merge)
 
         self._act_dissolve = QAction("グループ解除", self)
         self._act_dissolve.setEnabled(False)
@@ -509,6 +503,13 @@ class MainWindow(QMainWindow):
     # Grouping
     # ------------------------------------------------------------------
 
+    def _on_group_action(self) -> None:
+        """選択状態に応じてグループ化またはグループ結合を実行する。"""
+        if getattr(self, "_group_action_is_merge", False):
+            self._merge_groups()
+        else:
+            self._create_group()
+
     def _create_group(self) -> None:
         selected = self._grid.selected_items_data()
         images = [s for s in selected if isinstance(s, Image)]
@@ -668,10 +669,22 @@ class MainWindow(QMainWindow):
         multi_img   = num_images >= 2
 
         # グループ化: 画像のみ2枚以上選択（グループなし）
-        self._act_group.setEnabled(multi_img and not has_groups)
+        can_group = multi_img and not has_groups
         # グループ結合: グループを含み、合計2アイテム以上
         can_merge = has_groups and (num_groups + num_images >= 2)
-        self._act_merge.setEnabled(can_merge)
+        if can_merge:
+            self._act_group.setText("⊞ グループ結合")
+            self._act_group.setEnabled(True)
+            self._group_action_is_merge = True
+        elif can_group:
+            self._act_group.setText("⊞ グループ化")
+            self._act_group.setEnabled(True)
+            self._group_action_is_merge = False
+        else:
+            self._act_group.setText("⊞ グループ化")
+            self._act_group.setEnabled(False)
+            self._group_action_is_merge = False
+        # グループ結合: グループを含み、合計2アイテム以上
         self._act_dissolve.setEnabled(has_groups)
         self._act_remove.setEnabled(bool(items))
         self._act_regen_thumb.setEnabled(bool(items))
