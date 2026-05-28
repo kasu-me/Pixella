@@ -6,7 +6,7 @@ from datetime import datetime
 from pathlib import Path
 
 from PySide6.QtCore import Qt, QSettings, QTimer
-from PySide6.QtGui import QAction, QKeySequence
+from PySide6.QtGui import QAction, QColor, QKeySequence
 from PySide6.QtWidgets import (
     QApplication, QComboBox, QFileDialog, QHBoxLayout, QInputDialog,
     QLabel, QMainWindow, QMessageBox, QSizePolicy,
@@ -121,6 +121,7 @@ class MainWindow(QMainWindow):
         # Toolbar
         toolbar = QToolBar("メイン")
         toolbar.setMovable(False)
+        toolbar.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
         self.addToolBar(toolbar)
 
         # --- アルバムセレクター ---
@@ -138,20 +139,20 @@ class MainWindow(QMainWindow):
         toolbar.addWidget(album_container)
         toolbar.addSeparator()
 
-        self._act_add = QAction("＋ 画像を追加", self)
+        self._act_add = QAction("画像を追加", self)
         self._act_add.setShortcut(QKeySequence("Ctrl+O"))
         self._act_add.triggered.connect(self._open_images)
         toolbar.addAction(self._act_add)
 
         toolbar.addSeparator()
 
-        self._act_group = QAction("⊞ グループ化", self)
+        self._act_group = QAction("グループ化", self)
         self._act_group.setShortcut(QKeySequence("Ctrl+G"))
         self._act_group.setEnabled(False)
         self._act_group.triggered.connect(self._on_group_action)
         toolbar.addAction(self._act_group)
 
-        self._act_regex_group = QAction("🔍 正規表現グループ化", self)
+        self._act_regex_group = QAction("正規表現グループ化", self)
         self._act_regex_group.setToolTip("正規表現でファイル名を指定してグループ化します")
         self._act_regex_group.triggered.connect(self._on_regex_group_action)
         toolbar.addAction(self._act_regex_group)
@@ -169,14 +170,14 @@ class MainWindow(QMainWindow):
         self._act_remove.triggered.connect(self._remove_selected)
         toolbar.addAction(self._act_remove)
 
-        self._act_regen_thumb = QAction("🔄 サムネイル再生成", self)
+        self._act_regen_thumb = QAction("サムネイル再生成", self)
         self._act_regen_thumb.setEnabled(False)
         self._act_regen_thumb.triggered.connect(self._regen_selected_thumbs)
         toolbar.addAction(self._act_regen_thumb)
 
         toolbar.addSeparator()
 
-        self._act_theme = QAction("🌙 ダークモード", self)
+        self._act_theme = QAction("ダークモード", self)
         self._act_theme.setCheckable(True)
         self._act_theme.triggered.connect(self._toggle_theme)
         toolbar.addAction(self._act_theme)
@@ -237,6 +238,9 @@ class MainWindow(QMainWindow):
         self.setStatusBar(self._status)
         self._status_label = QLabel()
         self._status.addWidget(self._status_label)
+
+        # ツールバーアイコンを適用（初期テーマはライトモード）
+        self._update_action_icons(self._dark_mode)
 
     def _build_menu(self) -> None:
         mb = self.menuBar()
@@ -734,15 +738,15 @@ class MainWindow(QMainWindow):
         # グループ結合: グループを含み、合計2アイテム以上
         can_merge = has_groups and (num_groups + num_images >= 2)
         if can_merge:
-            self._act_group.setText("⊞ グループ結合")
+            self._act_group.setText("グループ結合")
             self._act_group.setEnabled(True)
             self._group_action_is_merge = True
         elif can_group:
-            self._act_group.setText("⊞ グループ化")
+            self._act_group.setText("グループ化")
             self._act_group.setEnabled(True)
             self._group_action_is_merge = False
         else:
-            self._act_group.setText("⊞ グループ化")
+            self._act_group.setText("グループ化")
             self._act_group.setEnabled(False)
             self._group_action_is_merge = False
         # グループ結合: グループを含み、合計2アイテム以上
@@ -1114,10 +1118,25 @@ class MainWindow(QMainWindow):
     # Theme
     # ------------------------------------------------------------------
 
+    def _update_action_icons(self, dark: bool) -> None:
+        """テーマに合わせた Segoe Fluent Icons をツールバーアクションに適用する。"""
+        from pixella.ui.fluent_icons import FluentGlyph, make_fluent_icon
+        color = QColor("#EFEFEF" if dark else "#1F1F1F")
+        sz = 20
+        self._act_add.setIcon(make_fluent_icon(FluentGlyph.ADD, sz, color))
+        self._act_group.setIcon(make_fluent_icon(FluentGlyph.GROUP, sz, color))
+        self._act_regex_group.setIcon(make_fluent_icon(FluentGlyph.SEARCH, sz, color))
+        self._act_dissolve.setIcon(make_fluent_icon(FluentGlyph.UNGROUP, sz, color))
+        self._act_remove.setIcon(make_fluent_icon(FluentGlyph.DELETE, sz, color))
+        self._act_regen_thumb.setIcon(make_fluent_icon(FluentGlyph.REFRESH, sz, color))
+        theme_glyph = FluentGlyph.BRIGHTNESS if dark else FluentGlyph.MOON
+        self._act_theme.setIcon(make_fluent_icon(theme_glyph, sz, color))
+
     def _toggle_theme(self, checked: bool) -> None:
         self._dark_mode = checked
-        self._act_theme.setText("☀ ライトモード" if checked else "🌙 ダークモード")
+        self._act_theme.setText("ライトモード" if checked else "ダークモード")
         apply_theme(QApplication.instance(), self._dark_mode)
+        self._update_action_icons(self._dark_mode)
 
     # ------------------------------------------------------------------
     # Export
