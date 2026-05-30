@@ -29,7 +29,7 @@ from sqlalchemy.orm import selectinload
 from pixella.ui.grid_view import ThumbnailGridWidget
 from pixella.ui.detail_panel import DetailPanel
 from pixella.ui.search_bar import SearchBar
-from pixella.ui.dialogs import GroupDialog, RegexInputDialog, RegexGroupPreviewDialog
+from pixella.ui.dialogs import GroupDialog, RegexInputDialog, RegexGroupPreviewDialog, suggest_group_name
 from pixella.ui.themes import apply_theme
 from pixella.ui.breadcrumb import BreadcrumbBar
 from pixella.ui.sort_bar import SortBar
@@ -525,7 +525,7 @@ class MainWindow(QMainWindow):
         if len(images) < 2:
             QMessageBox.information(self, "グループ化", "2枚以上の画像を選択してください。")
             return
-        dlg = GroupDialog([img.filename for img in images], parent=self)
+        dlg = GroupDialog([img.filename for img in images], default_name=suggest_group_name([img.filename for img in images]), parent=self)
         if dlg.exec() != GroupDialog.DialogCode.Accepted:
             return
         with get_session() as session:
@@ -541,7 +541,8 @@ class MainWindow(QMainWindow):
             return
         # メンバー一覧をダイアログに表示（グループ名＋画像ファイル名）
         member_names = [f"⊞ {g.name}" for g in groups] + [img.filename for img in images]
-        dlg = GroupDialog(member_names, parent=self)
+        all_names = [g.name for g in groups] + [img.filename for img in images]
+        dlg = GroupDialog(member_names, default_name=suggest_group_name(all_names), parent=self)
         dlg.setWindowTitle("グループ結合")
         if dlg.exec() != GroupDialog.DialogCode.Accepted:
             return

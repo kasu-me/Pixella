@@ -1,6 +1,8 @@
 """Dialog for creating or renaming a group."""
 from __future__ import annotations
 
+import os
+
 from PySide6.QtCore import Qt, QRect, QSize
 from PySide6.QtGui import QIcon, QPixmap
 from PySide6.QtWidgets import (
@@ -9,6 +11,28 @@ from PySide6.QtWidgets import (
 )
 
 from pixella.core.workers import ThumbnailWorkerPool
+
+
+def suggest_group_name(filenames: list[str]) -> str:
+    """ファイル名リストの共通プレフィックスからグループ名の候補を返す。
+
+    共通部分が 2 文字以下、または最短ファイル名ステムの 50% 以下の場合は
+    フォールバックとして '\u30B0\u30EB\u30FC\u30D7' を返す。
+    """
+    if not filenames:
+        return "\u30B0\u30EB\u30FC\u30D7"
+
+    stems = [os.path.splitext(os.path.basename(f))[0] for f in filenames]
+    common = os.path.commonprefix(stems).rstrip("_- ")
+
+    if not common:
+        return "\u30B0\u30EB\u30FC\u30D7"
+
+    min_len = min(len(s) for s in stems)
+    if len(common) <= 2 or len(common) <= min_len * 0.5:
+        return "\u30B0\u30EB\u30FC\u30D7"
+
+    return common
 
 
 class GroupDialog(QDialog):
