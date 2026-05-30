@@ -498,7 +498,17 @@ class MainWindow(QMainWindow):
 
     def _import_paths(self, paths: list[str]) -> None:
         added, skipped = add_images(paths)
-        self._refresh_grid()
+        # キャッシュ・補完リストを更新しつつ、現在のビューモード（検索・タグなし等）を維持する
+        with get_session() as session:
+            self._cached_images = all_images(session)
+            self._cached_groups = all_groups(session)
+            tags      = all_tag_names(session)
+            tag_infos = [(t.name, cnt, t.color) for t, cnt in all_tags_with_count(session)]
+            cmap      = all_tag_color_map(session)
+        self._detail.set_completion_list(tags)
+        self._detail.set_color_map(cmap)
+        self._search_bar.set_completion_list(tag_infos)
+        self._refresh_current_view()
         parts = []
         if added:
             parts.append(f"{added} 枚追加しました")
