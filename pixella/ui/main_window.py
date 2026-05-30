@@ -1297,3 +1297,28 @@ class MainWindow(QMainWindow):
                 self, "読み込み完了",
                 f"{len(albums_data)} 件のアルバムを読み込みました。"
             )
+
+    # ------------------------------------------------------------------
+    # Keyboard shortcuts
+    # ------------------------------------------------------------------
+
+    def keyPressEvent(self, event) -> None:
+        if event.key() == Qt.Key.Key_F2:
+            self._rename_selected_group()
+        else:
+            super().keyPressEvent(event)
+
+    def _rename_selected_group(self) -> None:
+        """選択中のアイテムがグループ1件の場合、グループ名変更ダイアログを開く。"""
+        selected = self._grid.selected_items_data()
+        if len(selected) != 1 or not isinstance(selected[0], Group):
+            return
+        group = selected[0]
+        new_name, ok = QInputDialog.getText(
+            self,
+            "グループ名を変更",
+            "新しいグループ名:",
+            text=group.name,
+        )
+        if ok and new_name.strip():
+            self._on_group_renamed(group, new_name.strip())
