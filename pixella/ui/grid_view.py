@@ -229,7 +229,7 @@ class ThumbnailGridWidget(QListWidget):
             # update_tag_colors が UserRole.tags を参照するため、
             # ここを更新しないと色変更時にチップが古い状態に戻る。
             lw_item.setData(Qt.ItemDataRole.UserRole, data)
-            lw_item.setData(TAG_COLORS_ROLE, [t.color for t in data.tags])
+            lw_item.setData(TAG_COLORS_ROLE, [t.color for t in sorted(data.tags, key=lambda t: (t.color or "~", t.name.lower()))])
             if isinstance(data, Group):
                 lw_item.setData(COUNT_ROLE, len(data.images))
             self.update(self.indexFromItem(lw_item))
@@ -242,7 +242,7 @@ class ThumbnailGridWidget(QListWidget):
                 continue
             colors = [
                 color_map.get(t.name, t.color)
-                for t in data.tags
+                for t in sorted(data.tags, key=lambda t: (color_map.get(t.name, t.color) or "~", t.name.lower()))
             ]
             lw_item.setData(TAG_COLORS_ROLE, colors)
         self.viewport().update()
@@ -264,7 +264,7 @@ class ThumbnailGridWidget(QListWidget):
 
         lw_item = QListWidgetItem(QIcon(self._placeholder), label)
         lw_item.setData(Qt.ItemDataRole.UserRole, data)
-        lw_item.setData(TAG_COLORS_ROLE, [t.color for t in data.tags])
+        lw_item.setData(TAG_COLORS_ROLE, [t.color for t in sorted(data.tags, key=lambda t: (t.color or "~", t.name.lower()))])
         if isinstance(data, Group):
             lw_item.setData(COUNT_ROLE, len(data.images))
         lw_item.setSizeHint(QSize(ITEM_SIZE, ITEM_SIZE + 24))

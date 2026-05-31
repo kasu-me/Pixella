@@ -489,7 +489,8 @@ class TagInputWidget(QWidget):
 
     def _rebuild_chips(self) -> None:
         chips = []
-        for tag in self._tags:
+        sorted_tags = sorted(self._tags, key=lambda t: (self._color_map.get(t) or "~", t.lower()))
+        for tag in sorted_tags:
             chip = TagChip(tag, color=self._color_map.get(tag))
             chip.removed.connect(self._remove_tag)
             chips.append(chip)
