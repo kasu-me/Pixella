@@ -247,9 +247,14 @@ class _TagLineEdit(QLineEdit):
         super().keyPressEvent(event)
 
         # ─── IME 英語モード等で textEdited が発火しない場合のフォールバック ────
-        # event.text() が非空（印字可能文字）かつプリエディット中でなければ
-        # ポップアップ更新をスケジュールする（textEdited との重複は安全）。
-        if event.text() and not self._current_preedit:
+        # 印字可能文字を伴う keyPressEvent が届いたということは、IME がこのキーを
+        # 変換用に消費していない ＝ アクティブなプリエディットが存在しない、という意味。
+        # そのため _current_preedit をここでクリアして、取り残された古い状態を自己修復する。
+        # これがないと、IME を英語入力へ切り替えた直後など _current_preedit が古い値の
+        # まま残っているケースで、一文字目のポップアップ更新が
+        # （_run_scheduled_popup_update のプリエディット判定により）抑止されてしまう。
+        if event.text():
+            self._current_preedit = ""
             self._schedule_update_popup()
 
     def inputMethodEvent(self, event: QInputMethodEvent) -> None:
@@ -275,6 +280,11 @@ class _TagLineEdit(QLineEdit):
     def focusOutEvent(self, event) -> None:
         super().focusOutEvent(event)
         self._popup_update_token += 1
+        # フォーカスが外れる際、システムは進行中の IME 変換を必ず終了させる。
+        # キャッシュしたプリエディット文字列が残っていると、再フォーカス後
+        # （例: IME モード切替で一旦ウィンドウが非アクティブになり戻ってきたとき）の
+        # 一文字目で誤ってポップアップ更新が抑止されるため、ここで必ずクリアする。
+        self._current_preedit = ""
         # フォーカスが外れたらポップアップを閉じる。
         # _CompletionPopup は NoFocus なのでポップアップクリックではここは呼ばれない。
         if self._popup:
