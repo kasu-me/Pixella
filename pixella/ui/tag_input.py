@@ -8,6 +8,8 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtGui import QFocusEvent, QInputMethodEvent, QKeyEvent
 
+from pixella.ui.ime_fix import ImeFirstCharRescue
+
 
 _MAX_SUGGESTIONS = 50  # 表示する候補数の上限
 
@@ -112,7 +114,7 @@ class _CompletionPopup(QListWidget):
         self.raise_()
 
 
-class _TagLineEdit(QLineEdit):
+class _TagLineEdit(ImeFirstCharRescue, QLineEdit):
     """
     カスタム補完ポップアップ付き QLineEdit。
 
@@ -225,6 +227,8 @@ class _TagLineEdit(QLineEdit):
             self.setCursorPosition(len(self.text()))
 
     def keyPressEvent(self, event: QKeyEvent) -> None:
+        # WM_CHAR 取りこぼし対策: Qt が配送したこの文字を pending から除く
+        self._rescue_on_key_press(event)
         popup = self._popup
         key = event.key()
 
@@ -264,6 +268,8 @@ class _TagLineEdit(QLineEdit):
         super().keyPressEvent(event)
 
     def inputMethodEvent(self, event: QInputMethodEvent) -> None:
+        # WM_CHAR 取りこぼし対策: 変換確定で入った文字の重複 WM_CHAR を抑止する
+        self._rescue_on_input_method(event)
         # 変換途中（プリエディット）かどうかを更新する。
         # keyPressEvent の Up/Down 即時表示判定で参照する。
         self._composing = bool(event.preeditString())

@@ -11,12 +11,16 @@ from pixella.core import AlbumManager
 from pixella.db.models import init_db
 from pixella.ui.main_window import MainWindow
 from pixella.ui.themes import apply_theme
+from pixella.ui.ime_fix import install_ime_fix
 
 
 def main() -> None:
     app = QApplication(sys.argv)
     app.setApplicationName("Pixella")
     app.setOrganizationName("Pixella")
+
+    # Windows IME「先頭文字落ち」恒久対策（Qt が取りこぼした WM_CHAR を補う。Windows のみ）
+    install_ime_fix(app)
 
     # Resource path for bundled exe
     base = Path(getattr(sys, "_MEIPASS", Path(__file__).parent))
