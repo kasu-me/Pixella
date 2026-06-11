@@ -56,6 +56,7 @@ class GroupWindow(QMainWindow):
 
         self._grid = ThumbnailGridWidget(pool)
         self._grid.selection_changed.connect(self._on_selection_changed)
+        self._grid.rating_set_requested.connect(self._on_rating_set)
         layout.addWidget(self._grid, 1)
 
         self._status = QStatusBar()
@@ -90,6 +91,20 @@ class GroupWindow(QMainWindow):
     # ------------------------------------------------------------------
     # Selection
     # ------------------------------------------------------------------
+
+    def _on_rating_set(self, images: list, rating: int) -> None:
+        """右クリックメニューからグループ内画像のレーティングを設定する。"""
+        from pixella.db import set_image_rating
+        image_ids = [i.id for i in images if isinstance(i, Image)]
+        if not image_ids:
+            return
+        set_image_rating(image_ids, rating)
+        id_set = set(image_ids)
+        for img in self._images:
+            if img.id in id_set:
+                img.rating = rating
+        for image_id in image_ids:
+            self._grid.update_rating(image_id, rating)
 
     def _on_selection_changed(self, items: list) -> None:
         if len(items) == 1 and isinstance(items[0], Image):

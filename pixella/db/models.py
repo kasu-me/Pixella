@@ -63,6 +63,7 @@ class Group(Base):
     name:          str      = Column(String, nullable=False)
     cover_image_id: int | None = Column(Integer, ForeignKey("images.id", ondelete="SET NULL"), nullable=True)
     created_at:    datetime = Column(DateTime, default=datetime.utcnow)
+    rating:        int      = Column(Integer, nullable=False, default=0, server_default="0")
 
     images:      list["Image"] = relationship("Image", back_populates="group", foreign_keys="Image.group_id")
     cover_image: "Image | None" = relationship("Image", foreign_keys=[cover_image_id])
@@ -77,6 +78,7 @@ class Image(Base):
     group_id:   int | None     = Column(Integer, ForeignKey("groups.id", ondelete="SET NULL"), nullable=True)
     added_at:   datetime       = Column(DateTime, default=datetime.utcnow)
     ctime:      float | None   = Column(Float, nullable=True)
+    rating:     int            = Column(Integer, nullable=False, default=0, server_default="0")
 
     group: Group | None = relationship("Group", back_populates="images", foreign_keys=[group_id])
     tags:  list[Tag]    = relationship("Tag", secondary=image_tag_table, back_populates="images")
@@ -117,6 +119,13 @@ def init_db(db_path: str | Path) -> None:
         img_cols = [row[1] for row in conn.exec_driver_sql("PRAGMA table_info(images)")]
         if "ctime" not in img_cols:
             conn.exec_driver_sql("ALTER TABLE images ADD COLUMN ctime REAL")
+            conn.commit()
+        if "rating" not in img_cols:
+            conn.exec_driver_sql("ALTER TABLE images ADD COLUMN rating INTEGER NOT NULL DEFAULT 0")
+            conn.commit()
+        grp_cols = [row[1] for row in conn.exec_driver_sql("PRAGMA table_info(groups)")]
+        if "rating" not in grp_cols:
+            conn.exec_driver_sql("ALTER TABLE groups ADD COLUMN rating INTEGER NOT NULL DEFAULT 0")
             conn.commit()
     # バックフィル: ctime が NULL の既存レコードにファイルシステムから取得して埋める
     _SessionLocal = sessionmaker(bind=engine, expire_on_commit=False)

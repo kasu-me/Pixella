@@ -6,7 +6,7 @@ from .repository import (
     search_by_tags, set_image_tags, set_group_tags, set_group_cover,
     export_json, export_json_combined, import_json, get_or_create_tag,
     bulk_apply_tag_delta, bulk_apply_group_tag_delta,
-    cleanup_uncolored_orphan_tags, _do_import, _validate_import_json,
+    cleanup_uncolored_orphan_tags, set_image_rating, set_group_rating, _do_import, _validate_import_json,
 )
 
 __all__ = [
@@ -17,5 +17,5 @@ __all__ = [
     "search_by_tags", "set_image_tags", "set_group_tags", "set_group_cover",
     "export_json", "export_json_combined", "import_json", "get_or_create_tag",
     "bulk_apply_tag_delta", "bulk_apply_group_tag_delta",
-    "cleanup_uncolored_orphan_tags", "_do_import", "_validate_import_json",
+    "cleanup_uncolored_orphan_tags", "set_image_rating", "set_group_rating", "_do_import", "_validate_import_json",
 ]

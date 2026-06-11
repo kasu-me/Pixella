@@ -469,6 +469,62 @@ QPushButton#tagManagerSortBtn[active="true"] {
     font-weight: bold;
 }
 
+/* ---- Star Rating ---- */
+QPushButton#starButton {
+    border: none;
+    background: transparent;
+    padding: 0;
+    font-size: 16pt;
+    color: #c4c8d0;
+}
+QPushButton#starButton[starState="on"] {
+    color: #f5b301;
+}
+QPushButton#starButton[starState="hover"] {
+    color: #ffcb3d;
+}
+
+/* ---- Rating Filter Bar ---- */
+QWidget#ratingBar {
+    background-color: #f0f2f5;
+    border: 1px solid #d0d4dc;
+    border-radius: 5px;
+}
+QLabel#ratingBarLabel {
+    color: #555555;
+    font-size: 9pt;
+}
+QPushButton#ratingOpBtn {
+    background-color: #ffffff;
+    border: 1px solid #b8bcc8;
+    border-radius: 4px;
+    padding: 2px 10px;
+    color: #1a1a1a;
+    font-size: 11pt;
+}
+QPushButton#ratingOpBtn:hover {
+    background-color: #dce3ee;
+    border-color: #8899bb;
+}
+QPushButton#ratingOpBtn:checked {
+    background-color: #3c82f6;
+    border-color: #2563eb;
+    color: #ffffff;
+}
+QPushButton#ratingEnableBtn {
+    background-color: #f0f2f5;
+    border: 1px solid #b8bcc8;
+    border-radius: 5px;
+    padding: 3px 10px;
+    color: #555555;
+    font-size: 9pt;
+}
+QPushButton#ratingEnableBtn:checked {
+    background-color: #f5b301;
+    border-color: #d99a00;
+    color: #ffffff;
+}
+
 /* ---- Completion Popup ---- */
 QListWidget#completionPopup {
     background-color: #ffffff;
@@ -959,6 +1015,62 @@ QPushButton#tagManagerSortBtn[active="true"] {
     border-color: #89b4fa;
     color: #89b4fa;
     font-weight: bold;
+}
+
+/* ---- Star Rating ---- */
+QPushButton#starButton {
+    border: none;
+    background: transparent;
+    padding: 0;
+    font-size: 16pt;
+    color: #585b70;
+}
+QPushButton#starButton[starState="on"] {
+    color: #f5b301;
+}
+QPushButton#starButton[starState="hover"] {
+    color: #ffcb3d;
+}
+
+/* ---- Rating Filter Bar ---- */
+QWidget#ratingBar {
+    background-color: #252535;
+    border: 1px solid #3a3a50;
+    border-radius: 5px;
+}
+QLabel#ratingBarLabel {
+    color: #a6adc8;
+    font-size: 9pt;
+}
+QPushButton#ratingOpBtn {
+    background-color: #313244;
+    border: 1px solid #45475a;
+    border-radius: 4px;
+    padding: 2px 10px;
+    color: #cdd6f4;
+    font-size: 11pt;
+}
+QPushButton#ratingOpBtn:hover {
+    background-color: #363650;
+    border-color: #7788bb;
+}
+QPushButton#ratingOpBtn:checked {
+    background-color: #89b4fa;
+    border-color: #74c7ec;
+    color: #1e1e2e;
+}
+QPushButton#ratingEnableBtn {
+    background-color: #313244;
+    border: 1px solid #45475a;
+    border-radius: 5px;
+    padding: 3px 10px;
+    color: #cdd6f4;
+    font-size: 9pt;
+}
+QPushButton#ratingEnableBtn:checked {
+    background-color: #f5b301;
+    border-color: #d99a00;
+    color: #1e1e2e;
 }
 
 /* ---- Completion Popup ---- */

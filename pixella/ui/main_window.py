@@ -21,7 +21,7 @@ from pixella.db import (
     remove_image_from_group, set_image_tags, set_group_tags,
     export_json, export_json_combined, import_json,
     bulk_apply_tag_delta, bulk_apply_group_tag_delta,
-    cleanup_uncolored_orphan_tags, _do_import, _validate_import_json,
+    cleanup_uncolored_orphan_tags, set_image_rating, set_group_rating, _do_import, _validate_import_json,
 )
 from pixella.db.models import Image, Group, Tag
 from sqlalchemy import select
@@ -33,6 +33,7 @@ from pixella.ui.dialogs import GroupDialog, RegexInputDialog, RegexGroupPreviewD
 from pixella.ui.themes import apply_theme
 from pixella.ui.breadcrumb import BreadcrumbBar
 from pixella.ui.sort_bar import SortBar
+from pixella.ui.rating_bar import RatingFilterBar
 from pixella.ui.tag_manager import TagManagerDialog
 from pixella.ui.group_window import GroupWindow
 
@@ -54,6 +55,10 @@ class MainWindow(QMainWindow):
         self._view_mode: str = "home"
         self._view_search_tags: list[str] = []
         self._view_search_mode: str = "and"
+        # レーティング絞り込み状態
+        self._rating_filter_on: bool = False
+        self._rating_filter_op: str = ">="
+        self._rating_filter_value: int = 0
 
         self.setWindowTitle(f"{__app_name__} {__version__}")
         self._build_ui()
@@ -196,10 +201,17 @@ class MainWindow(QMainWindow):
         self._search_bar.untagged_requested.connect(self._show_untagged)
         main_layout.addWidget(self._search_bar)
 
-        # Sort bar
+        # Sort + rating filter bar (横並び)
+        bar_row = QHBoxLayout()
+        bar_row.setContentsMargins(0, 0, 0, 0)
+        bar_row.setSpacing(6)
         self._sort_bar = SortBar()
         self._sort_bar.sort_changed.connect(self._on_sort_changed)
-        main_layout.addWidget(self._sort_bar)
+        bar_row.addWidget(self._sort_bar)
+        self._rating_bar = RatingFilterBar()
+        self._rating_bar.filter_changed.connect(self._on_rating_filter_changed)
+        bar_row.addWidget(self._rating_bar)
+        main_layout.addLayout(bar_row)
 
         # Breadcrumb bar
         self._breadcrumb = BreadcrumbBar()
@@ -214,6 +226,7 @@ class MainWindow(QMainWindow):
         self._grid.drop_files.connect(self._handle_dropped_files)
         self._grid.item_activated.connect(self._on_item_activated)
         self._grid.selection_changed.connect(self._on_selection_changed)
+        self._grid.rating_set_requested.connect(self._on_grid_rating_set)
 
         self._detail = DetailPanel()
         self._detail.tags_committed.connect(self._on_tags_committed)
@@ -224,6 +237,7 @@ class MainWindow(QMainWindow):
         self._detail.group_renamed.connect(self._on_group_renamed)
         self._detail.tags_copy_requested.connect(self._on_tags_copy)
         self._detail.tags_paste_requested.connect(self._on_tags_paste)
+        self._detail.rating_changed.connect(self._on_detail_rating_changed)
 
         splitter.addWidget(self._grid)
         splitter.addWidget(self._detail)
@@ -315,16 +329,86 @@ class MainWindow(QMainWindow):
         # 降順の場合グループ内一番は max、昇順は min
         return max(vals) if self._sort_desc else min(vals)
 
+    def _passes_rating(self, item) -> bool:
+        """レーティング絞り込み条件に画像／グループが合致するか判定する。"""
+        if not self._rating_filter_on:
+            return True
+        r = (item.rating or 0)
+        v = self._rating_filter_value
+        op = self._rating_filter_op
+        if op == ">=":
+            return r >= v
+        if op == "<=":
+            return r <= v
+        return r == v
+
     def _apply_sort(self, groups: list, images: list) -> list:
-        """groups + images をソートした display リストを返す。"""
+        """groups + images をソートした display リストを返す。
+
+        レーティング絞り込みが有効な場合は、画像・グループそれぞれの
+        レーティングが条件に合致するものだけを対象とする。
+        """
         grouped_ids = {img.id for g in groups for img in g.images}
         ungrouped = [img for img in images if img.id not in grouped_ids]
+        if self._rating_filter_on:
+            ungrouped = [img for img in ungrouped if self._passes_rating(img)]
+            groups = [g for g in groups if self._passes_rating(g)]
         merged = (
             [(self._get_grp_sort_key(g), g) for g in groups]
             + [(self._get_img_sort_key(img), img) for img in ungrouped]
         )
         merged.sort(key=lambda x: x[0], reverse=self._sort_desc)
         return [item for _, item in merged]
+
+    # ------------------------------------------------------------------
+    # Rating
+    # ------------------------------------------------------------------
+
+    def _on_rating_filter_changed(self, enabled: bool, op: str, value: int) -> None:
+        """レーティング絞り込みバーの変更を反映する。"""
+        self._rating_filter_on = enabled
+        self._rating_filter_op = op
+        self._rating_filter_value = value
+        self._refresh_current_view()
+
+    def _apply_rating(self, items: list, rating: int) -> None:
+        """画像／グループのレーティングを保存し、キャッシュとグリッド表示を更新する。"""
+        image_ids = [i.id for i in items if isinstance(i, Image)]
+        group_ids = [i.id for i in items if isinstance(i, Group)]
+        if not image_ids and not group_ids:
+            return
+        if image_ids:
+            set_image_rating(image_ids, rating)
+            img_id_set = set(image_ids)
+            for img in self._cached_images:
+                if img.id in img_id_set:
+                    img.rating = rating
+            for image_id in image_ids:
+                self._grid.update_rating(image_id, rating)
+        if group_ids:
+            set_group_rating(group_ids, rating)
+            grp_id_set = set(group_ids)
+            for grp in self._cached_groups:
+                if grp.id in grp_id_set:
+                    grp.rating = rating
+            for group_id in group_ids:
+                self._grid.update_rating(group_id, rating, is_group=True)
+        # レーティング絞り込み中は表示対象が変わる可能性があるため再描画
+        if self._rating_filter_on:
+            self._refresh_current_view()
+
+    def _on_detail_rating_changed(self, rating: int) -> None:
+        """詳細パネルの星操作 → 現在選択中の画像・グループすべてに適用する。"""
+        self._apply_rating(self._grid.selected_items_data(), rating)
+
+    def _on_grid_rating_set(self, items: list, rating: int) -> None:
+        """グリッドの右クリックメニューからのレーティング設定。"""
+        self._apply_rating(items, rating)
+        # 詳細パネルに単一選択中のアイテムがあれば星表示を同期
+        selected = self._grid.selected_items_data()
+        set_ids = {i.id for i in items}
+        if len(selected) == 1 and isinstance(selected[0], (Image, Group)) and selected[0].id in set_ids:
+            self._detail.update_rating_display(rating)
 
     # ------------------------------------------------------------------
     # Album management

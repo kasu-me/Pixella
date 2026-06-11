@@ -298,6 +298,49 @@ def remove_image(session: Session, image: Image) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Rating
+# ---------------------------------------------------------------------------
+
+def _clamp_rating(value: int) -> int:
+    """レーティングを 0〜5 の範囲に収める。"""
+    try:
+        v = int(value)
+    except (TypeError, ValueError):
+        return 0
+    return max(0, min(5, v))
+
+
+def set_image_rating(image_ids: list[int], rating: int) -> None:
+    """指定した画像群のレーティング（星0〜5）を一括設定する。"""
+    if not image_ids:
+        return
+    r = _clamp_rating(rating)
+    with get_session() as session:
+        for img in session.execute(
+            select(Image).where(Image.id.in_(image_ids))
+        ).scalars():
+            img.rating = r
+        session.commit()
+
+
+def set_group_rating(group_ids: list[int], rating: int) -> None:
+    """指定したグループ群のレーティング（星0〜5）を一括設定する。
+
+    グループタグと同様、グループ自身が独立してレーティングを持つ
+    （メンバー画像のレーティングとは無関係）。
+    """
+    if not group_ids:
+        return
+    r = _clamp_rating(rating)
+    with get_session() as session:
+        for grp in session.execute(
+            select(Group).where(Group.id.in_(group_ids))
+        ).scalars():
+            grp.rating = r
+        session.commit()
+
+
+# ---------------------------------------------------------------------------
 # Group CRUD
 # ---------------------------------------------------------------------------
 
@@ -314,6 +357,7 @@ def create_group(session: Session, name: str, image_ids: list[int]) -> Group:
     session.flush()  # get id
 
     # 画像のタグをマージしてグループに設定、画像からは外す
+    # レーティングはグループ内画像では一旦リセット（グループ解除時にグループの星を適用する）
     seen_ids: set[int] = set()
     merged_tags: list = []
     for img in images:
@@ -322,6 +366,7 @@ def create_group(session: Session, name: str, image_ids: list[int]) -> Group:
                 seen_ids.add(tag.id)
                 merged_tags.append(tag)
         img.tags = []
+        img.rating = 0
         img.group_id = group.id
     group.tags = merged_tags
 
@@ -353,12 +398,15 @@ def dissolve_group(session: Session, group: Group) -> None:
         return
 
     group_tags = list(full_group.tags)
+    group_rating = full_group.rating or 0
     for img in list(full_group.images):
         if group_tags:
             existing_ids = {t.id for t in img.tags}
             for tag in group_tags:
                 if tag.id not in existing_ids:
                     img.tags.append(tag)
+        # グループのレーティングを各メンバー画像へ適用
+        img.rating = group_rating
         img.group_id = None
     session.delete(full_group)
     session.flush()
@@ -479,6 +527,7 @@ def merge_groups(
     # これにより session.delete(grp) 時の自動 SET NULL 発行を防ぐ。
     for img in all_images_to_move:
         img.tags.clear()       # 個別タグをグループタグに集約
+        img.rating = 0         # グループ内画像のレーティングはリセット
         img.group = new_group  # ← カラム直接代入ではなくリレーションシップで移動
 
     # ---- フェーズ6: UPDATE images.group_id + DELETE image_tag を確定 ----
@@ -619,6 +668,7 @@ def _export_to_dict(session: Session) -> dict:
                 "path": img.path,
                 "group_id": img.group_id,
                 "ctime": img.ctime,
+                "rating": img.rating or 0,
                 "tags": [t.name for t in img.tags],
             }
             for img in all_images(session)
@@ -628,6 +678,7 @@ def _export_to_dict(session: Session) -> dict:
                 "id": g.id,
                 "name": g.name,
                 "cover_image_id": g.cover_image_id,
+                "rating": g.rating or 0,
                 "tags": [t.name for t in g.tags],
                 "image_ids": [img.id for img in g.images],
             }
@@ -737,6 +788,7 @@ def _do_import(session: Session, data: dict) -> None:
         img = Image(
             path=Path(img_data["path"]).as_posix(),
             ctime=img_data.get("ctime"),
+            rating=_clamp_rating(img_data.get("rating", 0)),
         )
         session.add(img)
         img_map[int(img_data["id"])] = img
@@ -751,7 +803,7 @@ def _do_import(session: Session, data: dict) -> None:
 
     # グループを再作成
     for grp_data in data["groups"]:
-        grp = Group(name=grp_data["name"])
+        grp = Group(name=grp_data["name"], rating=_clamp_rating(grp_data.get("rating", 0)))
         session.add(grp)
         session.flush()
 

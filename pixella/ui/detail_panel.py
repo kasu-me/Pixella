@@ -12,6 +12,7 @@ from PySide6.QtWidgets import (
 
 from pixella.db.models import Image, Group
 from pixella.ui.tag_input import TagInputWidget
+from pixella.ui.star_rating import StarRating
 
 
 class _SectionTitle(QLabel):
@@ -31,6 +32,7 @@ class DetailPanel(QWidget):
     group_renamed     = Signal(object, str)    # (Group, new_name)
     tags_copy_requested  = Signal()            # タグをコピーボタン
     tags_paste_requested = Signal()            # タグを貼り付けボタン
+    rating_changed       = Signal(int)         # レーティング変更 (0〜5) — 現在選択中の画像に適用
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -60,6 +62,18 @@ class DetailPanel(QWidget):
         line.setFrameShape(QFrame.Shape.HLine)
         line.setObjectName("divider")
         layout.addWidget(line)
+
+        # Rating section (画像のみ表示)
+        self._rating_section = QWidget()
+        rating_layout = QVBoxLayout(self._rating_section)
+        rating_layout.setContentsMargins(0, 0, 0, 0)
+        rating_layout.setSpacing(2)
+        rating_layout.addWidget(_SectionTitle("レーティング"))
+        self._rating = StarRating()
+        self._rating.rating_changed.connect(self.rating_changed)
+        rating_layout.addWidget(self._rating)
+        self._rating_section.setVisible(False)
+        layout.addWidget(self._rating_section)
 
         # Tags section
         layout.addWidget(_SectionTitle("タグ"))
@@ -139,6 +153,10 @@ class DetailPanel(QWidget):
         """タグクリップボードに内容があるかどうかで貼り付けボタンの有効/無効を切り替える。"""
         self._btn_paste_tags.setEnabled(available)
 
+    def update_rating_display(self, value: int) -> None:
+        """星表示をプログラム的に更新する（rating_changed は発火しない）。"""
+        self._rating.set_rating(value)
+
     def show_image(self, image: Image) -> None:
         self._current = image
         self._current_multi = []
@@ -150,6 +168,13 @@ class DetailPanel(QWidget):
             f"<b>{p.name}</b><br>"
             f"<small>{p.parent}</small>"
         )
+
+        # レーティング（グループ非所属の画像のみ編集可）
+        if image.group:
+            self._rating_section.setVisible(False)
+        else:
+            self._rating.set_rating(image.rating or 0)
+            self._rating_section.setVisible(True)
 
         # グループ所属画像はタグ編集不可
         if image.group:
@@ -198,6 +223,14 @@ class DetailPanel(QWidget):
         self._tag_input.set_tags(sorted(common))
         self._group_section.setVisible(False)
 
+        # レーティング: 選択中の全アイテム（画像・グループ）の共通値を表示し、操作で一括適用
+        if all_items:
+            ratings = {item.rating or 0 for item in all_items}
+            self._rating.set_rating(ratings.pop() if len(ratings) == 1 else 0)
+            self._rating_section.setVisible(True)
+        else:
+            self._rating_section.setVisible(False)
+
     def show_group(self, group: Group) -> None:
         self._current = group
         self._current_multi = []
@@ -214,6 +247,8 @@ class DetailPanel(QWidget):
         self._tag_input.setVisible(True)
         self._grouped_note.setVisible(False)
         self._tag_input.set_tags([t.name for t in group.tags])
+        self._rating.set_rating(group.rating or 0)
+        self._rating_section.setVisible(True)
         self._group_section.setVisible(False)
         self._group_rename_section.setVisible(True)
 
@@ -226,6 +261,7 @@ class DetailPanel(QWidget):
         self._tag_input.set_tags([])
         self._tag_input.setVisible(True)
         self._grouped_note.setVisible(False)
+        self._rating_section.setVisible(False)
         self._group_section.setVisible(False)
         self._group_rename_section.setVisible(False)
 

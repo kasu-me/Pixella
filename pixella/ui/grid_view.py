@@ -8,7 +8,7 @@ from typing import Union
 from PySide6.QtCore import Qt, Signal, QSize, QMimeData, QPoint, QUrl
 from PySide6.QtGui import QPixmap, QIcon, QDrag, QPainter, QColor, QFont, QFontMetrics, QDesktopServices, QWheelEvent
 from PySide6.QtWidgets import (
-    QAbstractItemView, QListWidget, QListWidgetItem, QSizePolicy,
+    QAbstractItemView, QListWidget, QListWidgetItem, QMenu, QSizePolicy,
     QStyledItemDelegate,
 )
 
@@ -25,13 +25,15 @@ GridItem = Union[Image, Group]
 TAG_COLORS_ROLE = Qt.ItemDataRole.UserRole + 1
 # カスタムデータロール — グループ内画像枚数を格納
 COUNT_ROLE = Qt.ItemDataRole.UserRole + 2
+# カスタムデータロール — 画像のレーティング (0〜5) を格納
+RATING_ROLE = Qt.ItemDataRole.UserRole + 3
 
 _CHIP_D   = 12   # チップ直径 (px)
 _CHIP_GAP = 3    # チップ間隔
 _CHIP_ML  = 5    # アイテム左端からのマージン
 _CHIP_PAD = 4    # 背景ストリップ内の左右パディング（均等）
 _CHIP_MY  = 4    # 背景ストリップ内の上下パディング
-_CHIP_MAX = 10   # 最大表示数
+_CHIP_MAX = 8   # 最大表示数
 _TEXT_H   = 40   # テキストラベル＋余白の高さ（チップ描画位置の算出用）
 _CHIP_DEFAULT_COLOR = "#dbeafe"  # 色未設定タグのデフォルト色（tagChip と統一）
 
@@ -64,6 +66,30 @@ class _TagChipDelegate(QStyledItemDelegate):
             painter.drawRoundedRect(bx, by, badge_w, badge_h, 4, 4)
             painter.setFont(font2)
             painter.setPen(QColor("white"))
+            painter.drawText(bx, by, badge_w, badge_h, Qt.AlignmentFlag.AlignCenter, text)
+            painter.restore()
+
+        # レーティング星バッジ（右下）— rating > 0 のとき描画
+        rating: int | None = index.data(RATING_ROLE)
+        if rating:
+            text = "★" * int(rating)
+            rfont = QFont()
+            rfont.setPointSize(10)
+            rfont.setBold(True)
+            fm = QFontMetrics(rfont)
+            pad_x, pad_y = 6, 3
+            badge_w = fm.horizontalAdvance(text) + pad_x * 2
+            badge_h = fm.height() + pad_y * 2
+            bx = r.right() - badge_w - 4
+            # サムネイル下端（テキストラベルの上）に右寄せで描画。タグチップは左下なので衝突しない
+            by = r.bottom() - _TEXT_H - badge_h + 1
+            painter.save()
+            painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(QColor(0, 0, 0, 140))
+            painter.drawRoundedRect(bx, by, badge_w, badge_h, 4, 4)
+            painter.setFont(rfont)
+            painter.setPen(QColor("#f5b301"))
             painter.drawText(bx, by, badge_w, badge_h, Qt.AlignmentFlag.AlignCenter, text)
             painter.restore()
 
@@ -135,6 +161,7 @@ class ThumbnailGridWidget(QListWidget):
     item_activated = Signal(object)    # emits Image or Group
     selection_changed = Signal(list)   # emits list[GridItem]
     drop_files = Signal(list)          # emits list[str] (file paths)
+    rating_set_requested = Signal(list, int)   # (selected Image data, rating 0〜5)
 
     def __init__(self, pool: ThumbnailWorkerPool, parent=None) -> None:
         super().__init__(parent)
@@ -230,8 +257,20 @@ class ThumbnailGridWidget(QListWidget):
             # ここを更新しないと色変更時にチップが古い状態に戻る。
             lw_item.setData(Qt.ItemDataRole.UserRole, data)
             lw_item.setData(TAG_COLORS_ROLE, [t.color for t in sorted(data.tags, key=lambda t: (t.color or "~", t.name.lower()))])
+            lw_item.setData(RATING_ROLE, data.rating or 0)
             if isinstance(data, Group):
                 lw_item.setData(COUNT_ROLE, len(data.images))
+            self.update(self.indexFromItem(lw_item))
+
+    def update_rating(self, item_id: int, rating: int, is_group: bool = False) -> None:
+        """画像／グループのレーティング表示を更新する（フル再ロード不要）。"""
+        key = f"grp:{item_id}" if is_group else f"img:{item_id}"
+        lw_item = self._id_to_item.get(key)
+        if lw_item:
+            data = lw_item.data(Qt.ItemDataRole.UserRole)
+            if isinstance(data, (Image, Group)):
+                data.rating = rating
+            lw_item.setData(RATING_ROLE, rating or 0)
             self.update(self.indexFromItem(lw_item))
 
     def update_tag_colors(self, color_map: dict[str, str | None]) -> None:
@@ -265,6 +304,7 @@ class ThumbnailGridWidget(QListWidget):
         lw_item = QListWidgetItem(QIcon(self._placeholder), label)
         lw_item.setData(Qt.ItemDataRole.UserRole, data)
         lw_item.setData(TAG_COLORS_ROLE, [t.color for t in sorted(data.tags, key=lambda t: (t.color or "~", t.name.lower()))])
+        lw_item.setData(RATING_ROLE, data.rating or 0)
         if isinstance(data, Group):
             lw_item.setData(COUNT_ROLE, len(data.images))
         lw_item.setSizeHint(QSize(ITEM_SIZE, ITEM_SIZE + 24))
@@ -283,6 +323,38 @@ class ThumbnailGridWidget(QListWidget):
 
     def _on_selection_changed(self) -> None:
         self.selection_changed.emit(self.selected_items_data())
+
+    # ------------------------------------------------------------------
+    # Context menu (rating)
+    # ------------------------------------------------------------------
+
+    def contextMenuEvent(self, event) -> None:  # type: ignore[override]
+        # 右クリック位置のアイテムが未選択なら、それを単独選択する
+        clicked = self.itemAt(event.pos())
+        if clicked is not None and not clicked.isSelected():
+            self.clearSelection()
+            clicked.setSelected(True)
+
+        items = [d for d in self.selected_items_data() if isinstance(d, (Image, Group))]
+        if not items:
+            return
+
+        menu = QMenu(self)
+        rating_menu = menu.addMenu(f"レーティングを設定 ({len(items)} 件)")
+        labels = [
+            ("★★★★★ (5)", 5),
+            ("★★★★ (4)",  4),
+            ("★★★ (3)",   3),
+            ("★★ (2)",    2),
+            ("★ (1)",     1),
+            ("なし (0)",   0),
+        ]
+        for label, value in labels:
+            act = rating_menu.addAction(label)
+            act.triggered.connect(
+                lambda _checked=False, v=value, its=items: self.rating_set_requested.emit(its, v)
+            )
+        menu.exec(event.globalPos())
 
     # ------------------------------------------------------------------
     # Visible-range thumbnail loading
