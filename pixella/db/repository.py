@@ -134,6 +134,13 @@ def add_image(path: str | Path) -> Image:
 
 def add_images(paths: list[str | Path]) -> tuple[int, int]:
     """画像を追加する。戻り値は (追加件数, スキップ件数) のタプル。"""
+    def _ctime(p: str | Path) -> float:
+        try:
+            return os.path.getctime(str(p))
+        except OSError:
+            return 0.0
+
+    paths = sorted(paths, key=_ctime)
     added = 0
     skipped = 0
     with get_session() as session:
