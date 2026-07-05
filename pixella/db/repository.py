@@ -304,6 +304,25 @@ def remove_image(session: Session, image: Image) -> None:
     session.flush()
 
 
+def save_image_hashes(rows: list[tuple[int, str, str, float]]) -> None:
+    """類似検出用ハッシュを一括保存する。
+
+    rows: [(image_id, phash_hex, dhash_hex, hash_mtime), ...]
+    """
+    if not rows:
+        return
+    with get_session() as session:
+        id_map = {r[0]: r for r in rows}
+        for img in session.execute(
+            select(Image).where(Image.id.in_(list(id_map)))
+        ).scalars():
+            _, phash, dhash, mtime = id_map[img.id]
+            img.phash = phash
+            img.dhash = dhash
+            img.hash_mtime = mtime
+        session.commit()
+
+
 # ---------------------------------------------------------------------------
 # Rating
 # ---------------------------------------------------------------------------
@@ -676,6 +695,9 @@ def _export_to_dict(session: Session) -> dict:
                 "group_id": img.group_id,
                 "ctime": img.ctime,
                 "rating": img.rating or 0,
+                "phash": img.phash,
+                "dhash": img.dhash,
+                "hash_mtime": img.hash_mtime,
                 "tags": [t.name for t in img.tags],
             }
             for img in all_images(session)
@@ -796,6 +818,9 @@ def _do_import(session: Session, data: dict) -> None:
             path=Path(img_data["path"]).as_posix(),
             ctime=img_data.get("ctime"),
             rating=_clamp_rating(img_data.get("rating", 0)),
+            phash=img_data.get("phash"),
+            dhash=img_data.get("dhash"),
+            hash_mtime=img_data.get("hash_mtime"),
         )
         session.add(img)
         img_map[int(img_data["id"])] = img

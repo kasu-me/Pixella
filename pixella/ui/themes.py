@@ -1,6 +1,73 @@
 """Qt stylesheets for light and dark themes."""
 from __future__ import annotations
 
+from pixella.core.config import DATA_DIR
+
+
+def _indicator_icons() -> dict[str, str]:
+    """チェックボックスの ✓ とラジオの中央ドットを PNG に描き出し、posix パスを返す。
+
+    QSS で ``background-color`` / ``border`` を指定するとネイティブのチェックマークが
+    描画されなくなるため、``image:`` で重ねる用の画像を自前で用意する。SVG は QImageReader
+    のプラグイン依存で環境によっては読めない（=何も描かれない）ため、確実に読める PNG を
+    QPainter で生成する。HiDPI でも滲まないよう実寸(14px)の 4 倍で描いて Qt に縮小させる。
+    """
+    from PySide6.QtCore import QPointF, Qt
+    from PySide6.QtGui import QColor, QImage, QPainter, QPainterPath, QPen
+
+    icon_dir = DATA_DIR / "icons"
+    icon_dir.mkdir(parents=True, exist_ok=True)
+    size = 56  # 14px * 4
+
+    def _new_image() -> QImage:
+        img = QImage(size, size, QImage.Format.Format_ARGB32)
+        img.fill(Qt.GlobalColor.transparent)
+        return img
+
+    def _check(color: str) -> QImage:
+        img = _new_image()
+        p = QPainter(img)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        pen = QPen(QColor(color))
+        pen.setWidthF(size * 0.15)
+        pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+        pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
+        p.setPen(pen)
+        path = QPainterPath()
+        path.moveTo(size * 0.22, size * 0.53)
+        path.lineTo(size * 0.42, size * 0.72)
+        path.lineTo(size * 0.78, size * 0.30)
+        p.drawPath(path)
+        p.end()
+        return img
+
+    def _dot(color: str) -> QImage:
+        img = _new_image()
+        p = QPainter(img)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        p.setPen(Qt.PenStyle.NoPen)
+        p.setBrush(QColor(color))
+        c = size / 2
+        r = size * 0.22
+        p.drawEllipse(QPointF(c, c), r, r)
+        p.end()
+        return img
+
+    # checked 時の塗り／ドット色に対してコントラストの付く色を選ぶ
+    specs = {
+        "check_light": _check("#ffffff"),   # 青い塗りの上 → 白いチェック
+        "check_dark": _check("#11111b"),    # 明るい青の塗りの上 → 濃紺のチェック
+        "dot_light": _dot("#3c82f6"),       # 白い下地の中 → 青いドット
+        "dot_dark": _dot("#89b4fa"),
+    }
+    paths: dict[str, str] = {}
+    for name, img in specs.items():
+        path = icon_dir / f"{name}.png"
+        img.save(str(path), "PNG")
+        paths[name] = path.as_posix()
+    return paths
+
+
 LIGHT = """
 QMainWindow, QWidget {
     background-color: #f5f5f5;
@@ -56,6 +123,41 @@ QPushButton#primaryBtn {
 
 QPushButton#primaryBtn:hover {
     background-color: #2563eb;
+}
+
+QCheckBox::indicator, QRadioButton::indicator {
+    width: 14px;
+    height: 14px;
+    border: 1.5px solid #9a9a9a;
+    background-color: #ffffff;
+}
+
+QCheckBox::indicator {
+    border-radius: 3px;
+}
+
+QRadioButton::indicator {
+    border-radius: 9px;
+}
+
+QCheckBox::indicator:hover, QRadioButton::indicator:hover {
+    border-color: #3c82f6;
+}
+
+QCheckBox::indicator:checked {
+    background-color: #3c82f6;
+    border-color: #3c82f6;
+    image: url("@@CHECK_ICON@@");
+}
+
+QRadioButton::indicator:checked {
+    border-color: #3c82f6;
+    image: url("@@RADIO_DOT@@");
+}
+
+QCheckBox::indicator:disabled, QRadioButton::indicator:disabled {
+    border-color: #d0d0d0;
+    background-color: #eaeaea;
 }
 
 QPushButton#untaggedBtn {
@@ -469,6 +571,53 @@ QPushButton#tagManagerSortBtn[active="true"] {
     font-weight: bold;
 }
 
+/* ---- Similarity Detection ---- */
+QProgressBar {
+    border: 1px solid #d0d4dc;
+    border-radius: 4px;
+    background: #e8ecf4;
+    text-align: center;
+    color: #555555;
+    font-size: 9pt;
+}
+
+QProgressBar::chunk {
+    background-color: #3c82f6;
+    border-radius: 3px;
+}
+
+QFrame#similarSetFrame {
+    border: 1px solid #e0e0e0;
+    border-radius: 6px;
+    background: #f7f9fc;
+}
+
+QLabel#similarSetHeader {
+    font-weight: bold;
+    color: #555555;
+}
+
+QFrame#similarCard {
+    border: 1px solid #e0e0e0;
+    border-radius: 6px;
+    background: #ffffff;
+}
+
+QFrame#similarCard:hover {
+    border-color: #3c82f6;
+    background: #eef2fa;
+}
+
+QLabel#similarCardInfo {
+    color: #888888;
+    font-size: 9pt;
+}
+
+QLabel#similarCardBadge {
+    color: #3c82f6;
+    font-size: 9pt;
+}
+
 /* ---- Star Rating ---- */
 QPushButton#starButton {
     border: none;
@@ -603,6 +752,42 @@ QPushButton#primaryBtn {
 QPushButton#primaryBtn:hover {
     background-color: #74c7ec;
 }
+
+QCheckBox::indicator, QRadioButton::indicator {
+    width: 14px;
+    height: 14px;
+    border: 1.5px solid #6c7086;
+    background-color: #2a2a3e;
+}
+
+QCheckBox::indicator {
+    border-radius: 3px;
+}
+
+QRadioButton::indicator {
+    border-radius: 9px;
+}
+
+QCheckBox::indicator:hover, QRadioButton::indicator:hover {
+    border-color: #89b4fa;
+}
+
+QCheckBox::indicator:checked {
+    background-color: #89b4fa;
+    border-color: #89b4fa;
+    image: url("@@CHECK_ICON@@");
+}
+
+QRadioButton::indicator:checked {
+    border-color: #89b4fa;
+    image: url("@@RADIO_DOT@@");
+}
+
+QCheckBox::indicator:disabled, QRadioButton::indicator:disabled {
+    border-color: #45475a;
+    background-color: #313244;
+}
+
 QPushButton#untaggedBtn {
     background-color: #313244;
     border: 1px solid #45475a;
@@ -1017,6 +1202,53 @@ QPushButton#tagManagerSortBtn[active="true"] {
     font-weight: bold;
 }
 
+/* ---- Similarity Detection ---- */
+QProgressBar {
+    border: 1px solid #45475a;
+    border-radius: 4px;
+    background: #2a2a3e;
+    text-align: center;
+    color: #a6adc8;
+    font-size: 9pt;
+}
+
+QProgressBar::chunk {
+    background-color: #89b4fa;
+    border-radius: 3px;
+}
+
+QFrame#similarSetFrame {
+    border: 1px solid #313244;
+    border-radius: 6px;
+    background: #1e1e2e;
+}
+
+QLabel#similarSetHeader {
+    font-weight: bold;
+    color: #a6adc8;
+}
+
+QFrame#similarCard {
+    border: 1px solid #45475a;
+    border-radius: 6px;
+    background: #2a2a3e;
+}
+
+QFrame#similarCard:hover {
+    border-color: #89b4fa;
+    background: #313244;
+}
+
+QLabel#similarCardInfo {
+    color: #6c7086;
+    font-size: 9pt;
+}
+
+QLabel#similarCardBadge {
+    color: #89b4fa;
+    font-size: 9pt;
+}
+
 /* ---- Star Rating ---- */
 QPushButton#starButton {
     border: none;
@@ -1096,4 +1328,9 @@ QListWidget#completionPopup::item:selected {
 
 
 def apply_theme(app, dark: bool) -> None:
-    app.setStyleSheet(DARK if dark else LIGHT)
+    icons = _indicator_icons()
+    qss = DARK if dark else LIGHT
+    suffix = "dark" if dark else "light"
+    qss = qss.replace("@@CHECK_ICON@@", icons[f"check_{suffix}"])
+    qss = qss.replace("@@RADIO_DOT@@", icons[f"dot_{suffix}"])
+    app.setStyleSheet(qss)

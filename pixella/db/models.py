@@ -79,6 +79,10 @@ class Image(Base):
     added_at:   datetime       = Column(DateTime, default=datetime.utcnow)
     ctime:      float | None   = Column(Float, nullable=True)
     rating:     int            = Column(Integer, nullable=False, default=0, server_default="0")
+    # 類似画像検出用 perceptual hash (16桁hex)。未計算は NULL、検出実行時に遅延計算する
+    phash:      str | None     = Column(String, nullable=True)
+    dhash:      str | None     = Column(String, nullable=True)
+    hash_mtime: float | None   = Column(Float, nullable=True)   # 計算時のファイル mtime (変更検知用)
 
     group: Group | None = relationship("Group", back_populates="images", foreign_keys=[group_id])
     tags:  list[Tag]    = relationship("Tag", secondary=image_tag_table, back_populates="images")
@@ -122,6 +126,15 @@ def init_db(db_path: str | Path) -> None:
             conn.commit()
         if "rating" not in img_cols:
             conn.exec_driver_sql("ALTER TABLE images ADD COLUMN rating INTEGER NOT NULL DEFAULT 0")
+            conn.commit()
+        if "phash" not in img_cols:
+            conn.exec_driver_sql("ALTER TABLE images ADD COLUMN phash TEXT")
+            conn.commit()
+        if "dhash" not in img_cols:
+            conn.exec_driver_sql("ALTER TABLE images ADD COLUMN dhash TEXT")
+            conn.commit()
+        if "hash_mtime" not in img_cols:
+            conn.exec_driver_sql("ALTER TABLE images ADD COLUMN hash_mtime REAL")
             conn.commit()
         grp_cols = [row[1] for row in conn.exec_driver_sql("PRAGMA table_info(groups)")]
         if "rating" not in grp_cols:

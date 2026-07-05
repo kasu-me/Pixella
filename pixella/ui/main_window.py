@@ -299,6 +299,12 @@ class MainWindow(QMainWindow):
         act_tag_manager.triggered.connect(self._open_tag_manager)
         tag_menu.addAction(act_tag_manager)
 
+        tool_menu = mb.addMenu("ツール")
+        act_similarity = QAction("類似画像を検出…", self)
+        act_similarity.setShortcut(QKeySequence("Ctrl+D"))
+        act_similarity.triggered.connect(self._open_similarity_dialog)
+        tool_menu.addAction(act_similarity)
+
     # ------------------------------------------------------------------
     # Sort
     # ------------------------------------------------------------------
@@ -514,6 +520,20 @@ class MainWindow(QMainWindow):
         self._tag_manager_dlg.show()
         self._tag_manager_dlg.raise_()
         self._tag_manager_dlg.activateWindow()
+
+    # ------------------------------------------------------------------
+    # Similarity detection
+    # ------------------------------------------------------------------
+
+    def _open_similarity_dialog(self) -> None:
+        if not hasattr(self, "_similarity_dlg") or self._similarity_dlg is None:
+            from pixella.ui.similarity_dialog import SimilarityDialog
+            self._similarity_dlg = SimilarityDialog(self._pool, self)
+            self._similarity_dlg.content_changed.connect(self._refresh_current_view)
+            self._similarity_dlg.finished.connect(lambda _: setattr(self, "_similarity_dlg", None))
+        self._similarity_dlg.show()
+        self._similarity_dlg.raise_()
+        self._similarity_dlg.activateWindow()
 
     def _on_tag_manager_search(self, tag_name: str) -> None:
         self._search_bar.set_text(tag_name)
