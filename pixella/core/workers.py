@@ -18,7 +18,10 @@ class ThumbnailTask(QRunnable):
         self._path = image_path
         self._cache = cache
         self.signals = _ThumbnailSignals()
-        self.setAutoDelete(True)
+        # autoDelete だと run() 直後にワーカースレッド側で Python ラッパーごと破棄され、
+        # メインスレッド所属の signals がスレッド違反で破棄されてクラッシュする。
+        # 参照は ThumbnailWorkerPool が保持し、シグナル配送後にメインスレッドで解放する。
+        self.setAutoDelete(False)
 
     def run(self) -> None:  # type: ignore[override]
         result = self._cache.ensure(self._path)
@@ -33,10 +36,14 @@ class ThumbnailWorkerPool:
         self._cache = cache
         self._pool = QThreadPool.globalInstance()
         self._pool.setMaxThreadCount(max_threads)
+        self._tasks: set[ThumbnailTask] = set()
 
     def request(self, image_id: int, image_path: str, on_done, on_error=None) -> None:
         task = ThumbnailTask(image_id, image_path, self._cache)
         task.signals.done.connect(on_done)
         if on_error:
             task.signals.error.connect(on_error)
+        self._tasks.add(task)
+        task.signals.done.connect(lambda *_a, t=task: self._tasks.discard(t))
+        task.signals.error.connect(lambda *_a, t=task: self._tasks.discard(t))
         self._pool.start(task)
