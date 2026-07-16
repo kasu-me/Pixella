@@ -1,7 +1,6 @@
 """Main application window."""
 from __future__ import annotations
 
-import os
 from datetime import datetime
 from pathlib import Path
 
@@ -18,7 +17,7 @@ from pixella.core import ThumbnailCache, ThumbnailWorkerPool, THUMB_DIR, SUPPORT
 from pixella.db import (
     get_session, init_db, all_images, all_groups, all_tag_names, all_tag_color_map, all_tags_with_count,
     add_images, images_without_tags, groups_without_tags, create_group, merge_groups, rename_group, dissolve_group,
-    remove_image_from_group, set_image_tags, set_group_tags,
+    remove_image, remove_image_from_group, set_image_tags, set_group_tags, search_by_tags,
     export_json, export_json_combined, import_json,
     bulk_apply_tag_delta, bulk_apply_group_tag_delta,
     cleanup_uncolored_orphan_tags, set_image_rating, set_group_rating, _do_import, _validate_import_json,
@@ -102,13 +101,15 @@ class MainWindow(QMainWindow):
         # QSettings は文字列で返る場合があるので bool に変換
         if isinstance(desc, str):
             desc = desc.lower() == "true"
+        # 不正な保存値は既定値に正規化（UI とソート状態の不一致を防ぐ）
+        valid_keys = ["added", "created", "name"]
+        if key not in valid_keys:
+            key = "added"
         self._sort_key_name = key
         self._sort_desc = bool(desc)
         # SortBar UI に反映（シグナルを一時ブロックして不要な再描画を防ぐ）
         self._sort_bar.blockSignals(True)
-        valid_keys = ["added", "created", "name"]
-        idx = valid_keys.index(key) if key in valid_keys else 0
-        self._sort_bar._combo.setCurrentIndex(idx)
+        self._sort_bar._combo.setCurrentIndex(valid_keys.index(key))
         self._sort_bar._dir_btn.setChecked(self._sort_desc)
         self._sort_bar.blockSignals(False)
 
@@ -422,14 +423,7 @@ class MainWindow(QMainWindow):
 
     def _init_album_combo(self) -> None:
         """コンボボックスをアルバムリストで初期化し、シグナルを接続する。"""
-        self._album_combo.blockSignals(True)
-        self._album_combo.clear()
-        for name in self._album_manager.album_names:
-            self._album_combo.addItem(name)
-        idx = self._album_combo.findText(self._album_manager.active_name)
-        if idx >= 0:
-            self._album_combo.setCurrentIndex(idx)
-        self._album_combo.blockSignals(False)
+        self._update_album_combo()
         self._album_combo.currentTextChanged.connect(self._on_album_changed)
 
     def _update_album_combo(self) -> None:
@@ -550,11 +544,8 @@ class MainWindow(QMainWindow):
     # Grid refresh
     # ------------------------------------------------------------------
 
-    def _refresh_grid(self) -> None:
-        self._view_mode = "home"
-        self._breadcrumb.set_home()
-        album = self._album_manager.active_name
-        self.setWindowTitle(f"{__app_name__} {__version__}  —  {album}")
+    def _reload_caches_and_completions(self) -> None:
+        """DBからキャッシュ・タグ補完リスト・カラーマップを再取得して各ウィジェットに反映する。"""
         with get_session() as session:
             self._cached_images = all_images(session)
             self._cached_groups = all_groups(session)
@@ -564,6 +555,13 @@ class MainWindow(QMainWindow):
         self._detail.set_completion_list(tags)
         self._detail.set_color_map(cmap)
         self._search_bar.set_completion_list(tag_infos)
+
+    def _refresh_grid(self) -> None:
+        self._view_mode = "home"
+        self._breadcrumb.set_home()
+        album = self._album_manager.active_name
+        self.setWindowTitle(f"{__app_name__} {__version__}  —  {album}")
+        self._reload_caches_and_completions()
         self._reload_display()
 
     def _reload_display(self) -> None:
@@ -603,15 +601,7 @@ class MainWindow(QMainWindow):
     def _import_paths(self, paths: list[str]) -> None:
         added, skipped = add_images(paths)
         # キャッシュ・補完リストを更新しつつ、現在のビューモード（検索・タグなし等）を維持する
-        with get_session() as session:
-            self._cached_images = all_images(session)
-            self._cached_groups = all_groups(session)
-            tags      = all_tag_names(session)
-            tag_infos = [(t.name, cnt, t.color) for t, cnt in all_tags_with_count(session)]
-            cmap      = all_tag_color_map(session)
-        self._detail.set_completion_list(tags)
-        self._detail.set_color_map(cmap)
-        self._search_bar.set_completion_list(tag_infos)
+        self._reload_caches_and_completions()
         self._refresh_current_view()
         parts = []
         if added:
@@ -784,7 +774,6 @@ class MainWindow(QMainWindow):
         image_ids = [i.id for i in selected if isinstance(i, Image)]
         group_ids  = [i.id for i in selected if isinstance(i, Group)]
         with get_session() as session:
-            from pixella.db.repository import remove_image
             for img in session.execute(select(Image).where(Image.id.in_(image_ids))).scalars():
                 remove_image(session, img)
             for grp in session.execute(select(Group).where(Group.id.in_(group_ids))).scalars():
@@ -864,7 +853,6 @@ class MainWindow(QMainWindow):
             self._act_group.setText("グループ化")
             self._act_group.setEnabled(False)
             self._group_action_is_merge = False
-        # グループ結合: グループを含み、合計2アイテム以上
         self._act_dissolve.setEnabled(has_groups)
         self._act_remove.setEnabled(bool(items))
         self._act_regen_thumb.setEnabled(bool(items))
@@ -973,6 +961,37 @@ class MainWindow(QMainWindow):
         self._detail.set_completion_list(all_t)
         QTimer.singleShot(0, lambda infos=tag_infos: self._search_bar.set_completion_list(infos))
 
+    def _refresh_items_in_session(self, session, image_ids: list[int], group_ids: list[int]) -> None:
+        """指定 ID の画像・グループを再ロードし、グリッドのチップとキャッシュを最新化する。
+
+        ソート変更などで _reload_display() が呼ばれてもチップが戻らないよう、
+        _cached_images / _cached_groups 内の対応アイテムも最新データで差し替える。
+        """
+        if image_ids:
+            for img in session.execute(
+                select(Image).where(Image.id.in_(image_ids))
+                .options(selectinload(Image.tags), selectinload(Image.group))
+            ).scalars():
+                self._grid.set_item_tags(img)
+                for i, cached in enumerate(self._cached_images):
+                    if cached.id == img.id:
+                        self._cached_images[i] = img
+                        break
+        if group_ids:
+            for grp in session.execute(
+                select(Group).where(Group.id.in_(group_ids))
+                .options(
+                    selectinload(Group.tags),
+                    selectinload(Group.cover_image),
+                    selectinload(Group.images).selectinload(Image.tags),
+                )
+            ).scalars():
+                self._grid.set_item_tags(grp)
+                for i, cached in enumerate(self._cached_groups):
+                    if cached.id == grp.id:
+                        self._cached_groups[i] = grp
+                        break
+
     def _on_multi_tag_added(self, items: list, tag: str) -> None:
         """複数アイテム選択時: 指定タグを全画像・グループに追加する。"""
         image_ids = [i.id for i in items if isinstance(i, Image)]
@@ -982,30 +1001,7 @@ class MainWindow(QMainWindow):
         with get_session() as session:
             all_t     = all_tag_names(session)
             tag_infos = [(t.name, cnt, t.color) for t, cnt in all_tags_with_count(session)]
-            if image_ids:
-                for img in session.execute(
-                    select(Image).where(Image.id.in_(image_ids))
-                    .options(selectinload(Image.tags), selectinload(Image.group))
-                ).scalars():
-                    self._grid.set_item_tags(img)
-                    for i, cached in enumerate(self._cached_images):
-                        if cached.id == img.id:
-                            self._cached_images[i] = img
-                            break
-            if group_ids:
-                for grp in session.execute(
-                    select(Group).where(Group.id.in_(group_ids))
-                    .options(
-                        selectinload(Group.tags),
-                        selectinload(Group.cover_image),
-                        selectinload(Group.images).selectinload(Image.tags),
-                    )
-                ).scalars():
-                    self._grid.set_item_tags(grp)
-                    for i, cached in enumerate(self._cached_groups):
-                        if cached.id == grp.id:
-                            self._cached_groups[i] = grp
-                            break
+            self._refresh_items_in_session(session, image_ids, group_ids)
         self._detail.set_completion_list(all_t)
         QTimer.singleShot(0, lambda infos=tag_infos: self._search_bar.set_completion_list(infos))
 
@@ -1021,30 +1017,7 @@ class MainWindow(QMainWindow):
             session.commit()
             all_t     = all_tag_names(session)  # cleanup 後に取得
             tag_infos = [(t.name, cnt, t.color) for t, cnt in all_tags_with_count(session)]
-            if image_ids:
-                for img in session.execute(
-                    select(Image).where(Image.id.in_(image_ids))
-                    .options(selectinload(Image.tags), selectinload(Image.group))
-                ).scalars():
-                    self._grid.set_item_tags(img)
-                    for i, cached in enumerate(self._cached_images):
-                        if cached.id == img.id:
-                            self._cached_images[i] = img
-                            break
-            if group_ids:
-                for grp in session.execute(
-                    select(Group).where(Group.id.in_(group_ids))
-                    .options(
-                        selectinload(Group.tags),
-                        selectinload(Group.cover_image),
-                        selectinload(Group.images).selectinload(Image.tags),
-                    )
-                ).scalars():
-                    self._grid.set_item_tags(grp)
-                    for i, cached in enumerate(self._cached_groups):
-                        if cached.id == grp.id:
-                            self._cached_groups[i] = grp
-                            break
+            self._refresh_items_in_session(session, image_ids, group_ids)
         self._detail.set_completion_list(all_t)
         QTimer.singleShot(0, lambda infos=tag_infos: self._search_bar.set_completion_list(infos))
 
@@ -1063,7 +1036,6 @@ class MainWindow(QMainWindow):
             rename_group(session, group.id, new_name)
             session.commit()
         # グリッドアイテムのラベルとデータを更新
-        from PySide6.QtCore import Qt
         lw_item = self._grid._id_to_item.get(f"grp:{group.id}")
         if lw_item:
             grp_data = lw_item.data(Qt.ItemDataRole.UserRole)
@@ -1155,30 +1127,7 @@ class MainWindow(QMainWindow):
             all_t     = all_tag_names(session)
             tag_infos = [(t.name, cnt, t.color) for t, cnt in all_tags_with_count(session)]
             cmap = all_tag_color_map(session)
-            if image_ids:
-                for img in session.execute(
-                    select(Image).where(Image.id.in_(image_ids))
-                    .options(selectinload(Image.tags), selectinload(Image.group))
-                ).scalars():
-                    self._grid.set_item_tags(img)
-                    for i, cached in enumerate(self._cached_images):
-                        if cached.id == img.id:
-                            self._cached_images[i] = img
-                            break
-            if group_ids:
-                for grp in session.execute(
-                    select(Group).where(Group.id.in_(group_ids))
-                    .options(
-                        selectinload(Group.tags),
-                        selectinload(Group.cover_image),
-                        selectinload(Group.images).selectinload(Image.tags),
-                    )
-                ).scalars():
-                    self._grid.set_item_tags(grp)
-                    for i, cached in enumerate(self._cached_groups):
-                        if cached.id == grp.id:
-                            self._cached_groups[i] = grp
-                            break
+            self._refresh_items_in_session(session, image_ids, group_ids)
         self._detail.set_completion_list(all_t)
         self._detail.set_color_map(cmap)
         self._search_bar.set_completion_list(tag_infos)
@@ -1191,7 +1140,6 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------------
 
     def _do_search(self, tags: list[str], mode: str = "and") -> None:
-        from pixella.db.repository import search_by_tags
         self._view_mode = "search"
         self._view_search_tags = list(tags)
         self._view_search_mode = mode

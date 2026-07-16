@@ -115,16 +115,6 @@ QPushButton:disabled {
     border-color: #d0d0d0;
 }
 
-QPushButton#primaryBtn {
-    background-color: #3c82f6;
-    color: white;
-    border: none;
-}
-
-QPushButton#primaryBtn:hover {
-    background-color: #2563eb;
-}
-
 QCheckBox::indicator, QRadioButton::indicator {
     width: 14px;
     height: 14px;
@@ -177,27 +167,6 @@ QPushButton#untaggedBtn:hover {
 QPushButton#untaggedBtn:checked {
     background-color: #f59e0b;
     border-color: #d97706;
-    color: #ffffff;
-}
-
-QPushButton#searchModeBtn {
-    background-color: #f0f2f5;
-    border: 1px solid #b8bcc8;
-    border-radius: 5px;
-    padding: 4px 6px;
-    color: #555555;
-    font-size: 9pt;
-    font-weight: bold;
-}
-
-QPushButton#searchModeBtn:hover {
-    background-color: #dce3ee;
-    border-color: #8899bb;
-}
-
-QPushButton#searchModeBtn:checked {
-    background-color: #3c82f6;
-    border-color: #2563eb;
     color: #ffffff;
 }
 
@@ -743,16 +712,6 @@ QPushButton:disabled {
     border-color: #313244;
 }
 
-QPushButton#primaryBtn {
-    background-color: #89b4fa;
-    color: #1e1e2e;
-    border: none;
-}
-
-QPushButton#primaryBtn:hover {
-    background-color: #74c7ec;
-}
-
 QCheckBox::indicator, QRadioButton::indicator {
     width: 14px;
     height: 14px;
@@ -805,27 +764,6 @@ QPushButton#untaggedBtn:hover {
 QPushButton#untaggedBtn:checked {
     background-color: #f59e0b;
     border-color: #d97706;
-    color: #1e1e2e;
-}
-
-QPushButton#searchModeBtn {
-    background-color: #313244;
-    border: 1px solid #45475a;
-    border-radius: 5px;
-    padding: 4px 6px;
-    color: #cdd6f4;
-    font-size: 9pt;
-    font-weight: bold;
-}
-
-QPushButton#searchModeBtn:hover {
-    background-color: #45475a;
-    border-color: #6c7086;
-}
-
-QPushButton#searchModeBtn:checked {
-    background-color: #89b4fa;
-    border-color: #74c7ec;
     color: #1e1e2e;
 }
 

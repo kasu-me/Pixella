@@ -49,7 +49,11 @@ class _ClusterTask(QRunnable):
         self._records = records
         self._preset = preset
         self.signals = _ClusterSignals()
-        self.setAutoDelete(True)
+        # autoDelete だと run() 直後にワーカースレッド側で Python ラッパーごと破棄され、
+        # メインスレッド所属の signals がスレッド違反で破棄されてクラッシュする
+        # （Hash/Thumbnail タスクと同じパターン）。参照は SimilarityDialog が保持し、
+        # シグナル配送後にメインスレッドで解放する。
+        self.setAutoDelete(False)
 
     def run(self) -> None:  # type: ignore[override]
         entries = [
@@ -161,6 +165,7 @@ class SimilarityDialog(QDialog):
         self._skipped = 0
         self._cards: dict[int, _ImageCard] = {}
         self._set_frames: list[tuple[QFrame, list[_ImageCard]]] = []
+        self._cluster_tasks: set[_ClusterTask] = set()  # setAutoDelete(False) タスクの参照保持
 
         layout = QVBoxLayout(self)
         self._stack = QStackedWidget()
@@ -383,6 +388,8 @@ class SimilarityDialog(QDialog):
         valid = [r for r in self._records.values() if r["phash"] and r["dhash"]]
         task = _ClusterTask(self._gen, valid, self._selected_preset())
         task.signals.done.connect(self._on_clusters_ready)
+        self._cluster_tasks.add(task)
+        task.signals.done.connect(lambda *_a, t=task: self._cluster_tasks.discard(t))
         QThreadPool.globalInstance().start(task)
 
     # ------------------------------------------------------------------

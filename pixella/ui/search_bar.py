@@ -131,13 +131,12 @@ class _AvailChip(QPushButton):
         self._tag = tag
         self.setObjectName("searchAvailChip")
         if color:
+            # QSS は opacity プロパティ非対応のため hover 用の個別指定はしない
             text_color = _contrast_color(color)
             self.setStyleSheet(
                 f"QPushButton#searchAvailChip {{"
                 f" background-color: {color}; color: {text_color};"
                 f" border-color: {color}; }}"
-                f" QPushButton#searchAvailChip:hover {{"
-                f" background-color: {color}; opacity: 0.85; }}"
             )
         self.clicked.connect(lambda: self.chosen.emit(self._tag))
 

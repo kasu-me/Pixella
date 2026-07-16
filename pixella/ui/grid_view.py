@@ -1,14 +1,12 @@
 """Grid view of image / group thumbnails."""
 from __future__ import annotations
 
-import os
-from pathlib import Path
 from typing import Union
 
-from PySide6.QtCore import Qt, Signal, QSize, QMimeData, QPoint, QUrl
-from PySide6.QtGui import QPixmap, QIcon, QDrag, QPainter, QColor, QFont, QFontMetrics, QDesktopServices, QWheelEvent
+from PySide6.QtCore import Qt, Signal, QSize, QUrl
+from PySide6.QtGui import QPixmap, QIcon, QPainter, QColor, QFont, QFontMetrics, QDesktopServices, QWheelEvent
 from PySide6.QtWidgets import (
-    QAbstractItemView, QListWidget, QListWidgetItem, QMenu, QSizePolicy,
+    QAbstractItemView, QListWidget, QListWidgetItem, QMenu,
     QStyledItemDelegate,
 )
 

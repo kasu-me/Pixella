@@ -6,8 +6,8 @@ from pathlib import Path
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import (
-    QFormLayout, QInputDialog, QLabel, QScrollArea, QSizePolicy,
-    QVBoxLayout, QWidget, QPushButton, QHBoxLayout, QFrame,
+    QFrame, QHBoxLayout, QInputDialog, QLabel, QPushButton,
+    QVBoxLayout, QWidget,
 )
 
 from pixella.db.models import Image, Group
@@ -100,7 +100,7 @@ class DetailPanel(QWidget):
         layout.addWidget(self._tag_input)
 
         # グループ所属画像の場合に表示する警告ノート
-        self._grouped_note = QLabel("ℹ この画像はグループに所属しています。\nタグはグループ導体で管理されます。")
+        self._grouped_note = QLabel("ℹ この画像はグループに所属しています。\nタグはグループ側で管理されます。")
         self._grouped_note.setObjectName("groupedNote")
         self._grouped_note.setWordWrap(True)
         self._grouped_note.setVisible(False)

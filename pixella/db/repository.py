@@ -4,7 +4,6 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
-from typing import Sequence
 
 from sqlalchemy import select, or_, delete
 from sqlalchemy.orm import Session, selectinload
@@ -792,8 +791,6 @@ def _do_import(session: Session, data: dict) -> None:
 
     この関数は session.commit() を呼ばない。呼び出し元で commit すること。
     """
-    from sqlalchemy import text
-
     # 全データを削除（CASCADE で中間テーブルも自動削除）
     session.execute(delete(Image))
     session.execute(delete(Group))

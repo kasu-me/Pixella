@@ -56,7 +56,7 @@ class TagManagerDialog(QDialog):
         self._header_layout.setSpacing(8)
         self._header_btns: dict[str, QPushButton] = {}
 
-        # 「色」ボタン — _COLOR_COL_W固定 (「色▲」など矏印」が入る幅)
+        # 「色」ボタン — _COLOR_COL_W 固定 (「色▲」など矢印が入る幅)
         btn_color = QPushButton("色")
         btn_color.setObjectName("tagManagerSortBtn")
         btn_color.setFlat(True)
@@ -244,12 +244,10 @@ class TagManagerDialog(QDialog):
         initial = QColor(btn.palette().button().color())
         chosen = QColorDialog.getColor(
             initial, self,
-            f"「{name}」のタグ颜色を選択",
-            QColorDialog.ColorDialogOption.ShowAlphaChannel,
+            f"「{name}」のタグの色を選択",
         )
         if not chosen.isValid():
             return
-        # 「クリア」: アルファを0に誻わせた場合は None扩张
         color_str: str | None = chosen.name()  # "#rrggbb"
         with get_session() as session:
             set_tag_color(session, tag_id, color_str)

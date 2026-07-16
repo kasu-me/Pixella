@@ -28,7 +28,7 @@ _DCT_C8 = [
 
 def dhash64(img: PILImage.Image) -> int:
     """dHash: 9x8 に縮小し、各行で隣接画素の大小を 64bit にする。"""
-    small = img.convert("L").resize((9, 8), PILImage.LANCZOS)
+    small = img.convert("L").resize((9, 8), PILImage.Resampling.LANCZOS)
     px = list(small.getdata())
     bits = 0
     for y in range(8):
@@ -40,7 +40,7 @@ def dhash64(img: PILImage.Image) -> int:
 
 def phash64(img: PILImage.Image) -> int:
     """pHash: 32x32 グレースケールの DCT 低周波 8x8 を中央値と比較して 64bit にする。"""
-    small = img.convert("L").resize((_DCT_N, _DCT_N), PILImage.LANCZOS)
+    small = img.convert("L").resize((_DCT_N, _DCT_N), PILImage.Resampling.LANCZOS)
     px = list(small.getdata())
     rows = [px[i * _DCT_N:(i + 1) * _DCT_N] for i in range(_DCT_N)]
     # Z = C8 · X · C8ᵀ (左上 8x8 のみ計算。フル 32x32 DCT は行わない)

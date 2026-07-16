@@ -15,7 +15,7 @@
 - 複数選択での一括タグ付け・一括タグ削除
 - 画像のグループ化・解除
 - グループをクリックで別ウィンドウ表示
-- グループ名のリネーム
+- グループ名のリネーム（F2 キーでも可能）
 - グループからの画像除外
 - 画像からグループを逆引き（詳細パネルに表示）
 - グループへのタグ付け
@@ -28,6 +28,12 @@
 - データを JSON で書き出し / 読み込み
 - ドラッグ&ドロップで画像を追加
 - ウィンドウサイズ・ソート設定の自動保存・復元
+- マルチアルバム対応（作成・名前変更・削除・切り替え。ソート設定はアルバムごとに保存）
+- 類似画像検出（Ctrl+D。dHash/pHash によるクラスタリング、厳密 / 標準 / ゆるめの3プリセット、重複画像の完全削除・管理からの除外・グループ化）
+- 正規表現でファイル名を指定してグループ化
+- タグのコピー＆貼り付け（単一・複数選択の共通タグに対応）
+- 全アルバムをまとめて1つの JSON に書き出し
+- Windows IME の先頭文字入力落ち対策
 
 ## 動作要件
 
@@ -56,9 +62,11 @@ pyinstaller pixella.spec
 
 `%APPDATA%\Pixella\`
 
-- `pixella.db` — SQLite データベース（タグ・グループ情報）
+- `albums\{uuid}.db` — アルバムごとの SQLite データベース（タグ・グループ情報）。マルチアルバムに対応しており、旧バージョンの `pixella.db` は初回起動時にデフォルトアルバムへ自動移行される
+- `albums_meta.json` — アルバム一覧とアクティブアルバム
 - `thumbnails\` — サムネイルキャッシュ
 - `exports\` — JSON 書き出し先
+- `icons\` — テーマ用インジケータアイコン（自動生成）
 
 ## ディレクトリ構成
 
@@ -72,24 +80,31 @@ pixella/
 └── pixella/
     ├── __init__.py          # バージョン情報
     ├── core/
-    │   ├── config.py        # データパス設定
-    │   ├── thumbnails.py    # サムネイルキャッシュ
-    │   └── workers.py       # バックグラウンドスレッド
+    │   ├── config.py         # データパス設定
+    │   ├── album_manager.py  # マルチアルバム管理
+    │   ├── thumbnails.py     # サムネイルキャッシュ
+    │   ├── similarity.py     # 類似画像検出のハッシュ計算・クラスタリング
+    │   └── workers.py        # バックグラウンドスレッド
     ├── db/
-    │   ├── models.py        # SQLAlchemy モデル (Image / Group / Tag)
-    │   └── repository.py    # DB 操作
+    │   ├── models.py         # SQLAlchemy モデル (Image / Group / Tag)
+    │   └── repository.py     # DB 操作
     └── ui/
-        ├── main_window.py   # メインウィンドウ
-        ├── grid_view.py     # サムネイルグリッド
-        ├── detail_panel.py  # 詳細パネル（プレビュー・タグ・グループ情報）
-        ├── tag_input.py     # タグ入力ウィジェット
-        ├── tag_manager.py   # タグ管理ダイアログ
-        ├── search_bar.py    # 検索バー（AND/OR・タグなし絞り込み）
-        ├── sort_bar.py      # 並び替えコントロール
-        ├── breadcrumb.py    # ブレッドクラムナビゲーション
-        ├── group_window.py  # グループ別ウィンドウ
-        ├── dialogs.py       # グループ作成ダイアログ
-        └── themes.py        # ライト/ダークテーマ
+        ├── main_window.py     # メインウィンドウ
+        ├── grid_view.py       # サムネイルグリッド
+        ├── detail_panel.py    # 詳細パネル（プレビュー・タグ・グループ情報）
+        ├── tag_input.py       # タグ入力ウィジェット
+        ├── tag_manager.py     # タグ管理ダイアログ
+        ├── search_bar.py      # 検索バー（AND/OR・タグなし絞り込み）
+        ├── sort_bar.py        # 並び替えコントロール
+        ├── breadcrumb.py      # ブレッドクラムナビゲーション
+        ├── group_window.py    # グループ別ウィンドウ
+        ├── dialogs.py         # グループ作成ダイアログ
+        ├── similarity_dialog.py  # 類似画像検出ダイアログ
+        ├── star_rating.py     # 星評価ウィジェット
+        ├── rating_bar.py      # レーティング絞り込みバー
+        ├── fluent_icons.py    # アイコン生成
+        ├── ime_fix.py         # Windows IME 先頭文字落ち対策
+        └── themes.py          # ライト/ダークテーマ
 ```
 
 ## アンインストール
@@ -112,7 +127,7 @@ pixella/
    ```
 
 > [!WARNING]
-> 手順 2 を実行するとデータベース (`pixella.db`) およびサムネイルキャッシュが完全に削除されます。事前に JSON 書き出し（Ctrl+E）でバックアップを取ることを推奨します。
+> 手順 2 を実行すると全アルバムのデータベース (`albums\*.db`) およびサムネイルキャッシュが完全に削除されます。事前に JSON 書き出し（Ctrl+E）でバックアップを取ることを推奨します。
 
 ## 関連プロジェクト
 本アプリからエクスポートしたJSONファイルをもとに、画像の検索･閲覧ができるWebアプリ [Pixella Web Viewer](https://github.com/kasu-me/Pixella-Web-Viewer) もご利用ください。

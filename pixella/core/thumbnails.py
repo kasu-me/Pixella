@@ -35,7 +35,7 @@ class ThumbnailCache:
                 if hasattr(img, "n_frames") and img.n_frames > 1:
                     img.seek(0)
                 img = img.convert("RGBA")
-                img.thumbnail(THUMB_SIZE, PILImage.LANCZOS)
+                img.thumbnail(THUMB_SIZE, PILImage.Resampling.LANCZOS)
                 # Place on transparent canvas to preserve aspect ratio
                 canvas = PILImage.new("RGBA", THUMB_SIZE, (0, 0, 0, 0))
                 offset = (

@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import os
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 from sqlalchemy import (
@@ -16,6 +16,11 @@ from sqlalchemy.orm import DeclarativeBase, Session, relationship, sessionmaker
 
 class Base(DeclarativeBase):
     __allow_unmapped__ = True
+
+
+def _utcnow() -> datetime:
+    """DateTime カラム既定値用の naive UTC 現在時刻（datetime.utcnow は非推奨）。"""
+    return datetime.now(timezone.utc).replace(tzinfo=None)
 
 
 # ---------------------------------------------------------------------------
@@ -62,7 +67,7 @@ class Group(Base):
     id:            int      = Column(Integer, primary_key=True, autoincrement=True)
     name:          str      = Column(String, nullable=False)
     cover_image_id: int | None = Column(Integer, ForeignKey("images.id", ondelete="SET NULL"), nullable=True)
-    created_at:    datetime = Column(DateTime, default=datetime.utcnow)
+    created_at:    datetime = Column(DateTime, default=_utcnow)
     rating:        int      = Column(Integer, nullable=False, default=0, server_default="0")
 
     images:      list["Image"] = relationship("Image", back_populates="group", foreign_keys="Image.group_id")
@@ -76,7 +81,7 @@ class Image(Base):
     id:         int            = Column(Integer, primary_key=True, autoincrement=True)
     path:       str            = Column(String, unique=True, nullable=False)
     group_id:   int | None     = Column(Integer, ForeignKey("groups.id", ondelete="SET NULL"), nullable=True)
-    added_at:   datetime       = Column(DateTime, default=datetime.utcnow)
+    added_at:   datetime       = Column(DateTime, default=_utcnow)
     ctime:      float | None   = Column(Float, nullable=True)
     rating:     int            = Column(Integer, nullable=False, default=0, server_default="0")
     # 類似画像検出用 perceptual hash (16桁hex)。未計算は NULL、検出実行時に遅延計算する
@@ -157,8 +162,10 @@ def _normalize_backslash_paths() -> None:
     """path にバックスラッシュが含まれる既存レコードをフォワードスラッシュに変換する。"""
     from sqlalchemy import text
     with _SessionLocal() as session:
+        # SQLite の LIKE でバックスラッシュはエスケープ文字ではなくリテラル。
+        # パターンは「\ を1つ以上含む」= '%\%'（Python 文字列では '%\\%'）とする。
         rows = session.execute(
-            text("SELECT id, path FROM images WHERE path LIKE '%\\\\%'")
+            text("SELECT id, path FROM images WHERE path LIKE '%\\%'")
         ).fetchall()
         if not rows:
             return
