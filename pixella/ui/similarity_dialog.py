@@ -57,7 +57,7 @@ class _ClusterTask(QRunnable):
 
     def run(self) -> None:  # type: ignore[override]
         entries = [
-            (r["id"], hex_to_hash(r["phash"]), hex_to_hash(r["dhash"]))
+            (r["id"], hex_to_hash(r["phash"]), hex_to_hash(r["dhash"]), r["gray"])
             for r in self._records
         ]
         clusters = find_similar_clusters(entries, self._preset)[:MAX_SETS]
@@ -159,7 +159,7 @@ class SimilarityDialog(QDialog):
         self._hash_pool: HashWorkerPool | None = None
         self._gen = 0                     # 実行世代 (キャンセル後の遅延シグナルを無視するため)
         self._records: dict[int, dict] = {}
-        self._pending_rows: list[tuple[int, str, str, float]] = []
+        self._pending_rows: list[tuple[int, str, str, bytes, float]] = []
         self._hash_total = 0
         self._hash_done = 0
         self._skipped = 0
@@ -310,10 +310,12 @@ class SimilarityDialog(QDialog):
                 "group_name": img.group.name if img.group is not None else None,
                 "phash": img.phash,
                 "dhash": img.dhash,
+                "gray": img.gray,
             }
             self._records[img.id] = rec
-            if not (img.phash and img.dhash and img.hash_mtime == st.st_mtime):
-                rec["phash"] = rec["dhash"] = None  # 再計算対象 (未計算 or ファイル更新)
+            if not (img.phash and img.dhash and img.gray and img.hash_mtime == st.st_mtime):
+                # 再計算対象 (未計算 or 旧形式 or ファイル更新)
+                rec["phash"] = rec["dhash"] = rec["gray"] = None
                 to_hash.append(rec)
 
         self._hash_total = len(to_hash)
@@ -341,14 +343,16 @@ class SimilarityDialog(QDialog):
         self._progress_label.setText(text)
 
     def _on_hash_done(self, gen: int, image_id: int, phash: str, dhash: str,
-                      mtime: float, width: int, height: int, filesize: int) -> None:
+                      gray: bytes, mtime: float, width: int, height: int,
+                      filesize: int) -> None:
         if gen != self._gen:
             return
         rec = self._records.get(image_id)
         if rec is not None:
             rec["phash"] = phash
             rec["dhash"] = dhash
-        self._pending_rows.append((image_id, phash, dhash, mtime))
+            rec["gray"] = gray
+        self._pending_rows.append((image_id, phash, dhash, gray, mtime))
         if len(self._pending_rows) >= SAVE_BATCH:
             self._flush_pending_rows()
         self._advance_hash_progress()
@@ -385,7 +389,7 @@ class SimilarityDialog(QDialog):
         self._hash_pool = None
         self._progress_label.setText("比較中…")
         self._progress_bar.setRange(0, 0)  # インデターミネート
-        valid = [r for r in self._records.values() if r["phash"] and r["dhash"]]
+        valid = [r for r in self._records.values() if r["phash"] and r["dhash"] and r["gray"]]
         task = _ClusterTask(self._gen, valid, self._selected_preset())
         task.signals.done.connect(self._on_clusters_ready)
         self._cluster_tasks.add(task)

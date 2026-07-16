@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from sqlalchemy import (
-    Column, DateTime, Float, ForeignKey, Integer, String, Table, create_engine
+    Column, DateTime, Float, ForeignKey, Integer, LargeBinary, String, Table, create_engine
 )
 from sqlalchemy.orm import DeclarativeBase, Session, relationship, sessionmaker
 
@@ -88,6 +88,7 @@ class Image(Base):
     phash:      str | None     = Column(String, nullable=True)
     dhash:      str | None     = Column(String, nullable=True)
     hash_mtime: float | None   = Column(Float, nullable=True)   # 計算時のファイル mtime (変更検知用)
+    gray:       bytes | None   = Column(LargeBinary, nullable=True)  # 32x32 グレースケール生画素 (ピクセル照合用)
 
     group: Group | None = relationship("Group", back_populates="images", foreign_keys=[group_id])
     tags:  list[Tag]    = relationship("Tag", secondary=image_tag_table, back_populates="images")
@@ -140,6 +141,9 @@ def init_db(db_path: str | Path) -> None:
             conn.commit()
         if "hash_mtime" not in img_cols:
             conn.exec_driver_sql("ALTER TABLE images ADD COLUMN hash_mtime REAL")
+            conn.commit()
+        if "gray" not in img_cols:
+            conn.exec_driver_sql("ALTER TABLE images ADD COLUMN gray BLOB")
             conn.commit()
         grp_cols = [row[1] for row in conn.exec_driver_sql("PRAGMA table_info(groups)")]
         if "rating" not in grp_cols:

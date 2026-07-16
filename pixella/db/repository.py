@@ -303,10 +303,10 @@ def remove_image(session: Session, image: Image) -> None:
     session.flush()
 
 
-def save_image_hashes(rows: list[tuple[int, str, str, float]]) -> None:
-    """類似検出用ハッシュを一括保存する。
+def save_image_hashes(rows: list[tuple[int, str, str, bytes, float]]) -> None:
+    """類似検出用ハッシュとピクセル照合用グレースケールを一括保存する。
 
-    rows: [(image_id, phash_hex, dhash_hex, hash_mtime), ...]
+    rows: [(image_id, phash_hex, dhash_hex, gray, hash_mtime), ...]
     """
     if not rows:
         return
@@ -315,9 +315,10 @@ def save_image_hashes(rows: list[tuple[int, str, str, float]]) -> None:
         for img in session.execute(
             select(Image).where(Image.id.in_(list(id_map)))
         ).scalars():
-            _, phash, dhash, mtime = id_map[img.id]
+            _, phash, dhash, gray, mtime = id_map[img.id]
             img.phash = phash
             img.dhash = dhash
+            img.gray = gray
             img.hash_mtime = mtime
         session.commit()
 

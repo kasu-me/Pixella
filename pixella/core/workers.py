@@ -54,16 +54,18 @@ class ThumbnailWorkerPool:
 
 
 class _HashSignals(QObject):
-    # (image_id, phash_hex, dhash_hex, mtime, width, height, filesize)
-    done = Signal(int, str, str, float, int, int, int)
+    # (image_id, phash_hex, dhash_hex, gray, mtime, width, height, filesize)
+    # gray は bytes だが、PySide6 が QByteArray に変換しないよう object 型で渡す
+    done = Signal(int, str, str, object, float, int, int, int)
     error = Signal(int)  # image_id
 
 
 class HashTask(QRunnable):
     """類似検出用ハッシュを 1 画像分計算するタスク。
 
-    画像を 1 回だけ開き、pHash/dHash に加えて結果画面の表示に使う
-    解像度・ファイルサイズも同時に収集する。DB へは書かず Signal で返す。
+    画像を 1 回だけ開き、pHash/dHash・ピクセル照合用グレースケールに加えて
+    結果画面の表示に使う解像度・ファイルサイズも同時に収集する。
+    DB へは書かず Signal で返す。
     """
 
     def __init__(self, image_id: int, image_path: str, cancel: threading.Event) -> None:
@@ -82,12 +84,12 @@ class HashTask(QRunnable):
             return
         try:
             stat = os.stat(self._path)
-            phash, dhash, width, height = compute_image_hashes(self._path)
+            phash, dhash, gray, width, height = compute_image_hashes(self._path)
         except Exception:
             self.signals.error.emit(self._id)
             return
         self.signals.done.emit(
-            self._id, hash_to_hex(phash), hash_to_hex(dhash),
+            self._id, hash_to_hex(phash), hash_to_hex(dhash), gray,
             stat.st_mtime, width, height, stat.st_size,
         )
 
