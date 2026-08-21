@@ -587,6 +587,17 @@ QLabel#similarCardBadge {
     font-size: 9pt;
 }
 
+QFrame#ignoredSetRow {
+    border: 1px solid #e0e0e0;
+    border-radius: 6px;
+    background: #ffffff;
+}
+
+QFrame#ignoredSetRow:hover {
+    border-color: #3c82f6;
+    background: #eef2fa;
+}
+
 /* ---- Star Rating ---- */
 QPushButton#starButton {
     border: none;
@@ -1185,6 +1196,17 @@ QLabel#similarCardInfo {
 QLabel#similarCardBadge {
     color: #89b4fa;
     font-size: 9pt;
+}
+
+QFrame#ignoredSetRow {
+    border: 1px solid #45475a;
+    border-radius: 6px;
+    background: #2a2a3e;
+}
+
+QFrame#ignoredSetRow:hover {
+    border-color: #89b4fa;
+    background: #313244;
 }
 
 /* ---- Star Rating ---- */

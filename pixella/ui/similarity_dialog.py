@@ -18,7 +18,9 @@ from pixella.core.workers import HashWorkerPool, ThumbnailWorkerPool
 from pixella.db import get_session, all_images
 from pixella.db.models import Image
 from pixella.db.repository import (
-    create_group, remove_image, remove_image_from_group, save_image_hashes,
+    add_similar_ignore, all_similar_ignores, create_group, delete_similar_ignores,
+    prune_similar_ignores, remove_image, remove_image_from_group, save_image_hashes,
+    similar_ignore_sets,
 )
 from pixella.ui.dialogs import GroupDialog, suggest_group_name
 
@@ -26,6 +28,8 @@ MAX_SETS = 200          # 結果画面に表示する類似セットの上限
 CARDS_PER_ROW = 4
 THUMB_PX = 140
 SAVE_BATCH = 200        # ハッシュを DB へまとめ書きする件数
+IGNORE_THUMB_PX = 56    # 非表示指定の管理ダイアログのサムネイルサイズ
+IGNORE_MAX_THUMBS = 10  # 1 件あたりに並べるサムネイルの上限
 
 
 def _fmt_size(n: float) -> str:
@@ -37,17 +41,20 @@ def _fmt_size(n: float) -> str:
 
 
 class _ClusterSignals(QObject):
-    done = Signal(int, list)  # (run_gen, [[カード情報 dict, ...], ...])
+    # (run_gen, [[カード情報 dict, ...], ...], 非表示指定で除外したセット数)
+    done = Signal(int, list, int)
 
 
 class _ClusterTask(QRunnable):
     """クラスタリングと結果表示用メタデータ収集をバックグラウンドで行う。"""
 
-    def __init__(self, gen: int, records: list[dict], preset: Preset) -> None:
+    def __init__(self, gen: int, records: list[dict], preset: Preset,
+                 ignored: set[frozenset[int]]) -> None:
         super().__init__()
         self._gen = gen
         self._records = records
         self._preset = preset
+        self._ignored = ignored
         self.signals = _ClusterSignals()
         # autoDelete だと run() 直後にワーカースレッド側で Python ラッパーごと破棄され、
         # メインスレッド所属の signals がスレッド違反で破棄されてクラッシュする
@@ -60,7 +67,15 @@ class _ClusterTask(QRunnable):
             (r["id"], hex_to_hash(r["phash"]), hex_to_hash(r["dhash"]), r["gray"])
             for r in self._records
         ]
-        clusters = find_similar_clusters(entries, self._preset)[:MAX_SETS]
+        clusters = find_similar_clusters(entries, self._preset)
+        # 「今後表示しない」と指定された組み合わせ (顔ぶれ完全一致) を除外する。
+        # 上限で切る前に除外しないと、非表示セットが表示枠を消費してしまう。
+        hidden = 0
+        if self._ignored:
+            kept = [c for c in clusters if frozenset(c) not in self._ignored]
+            hidden = len(clusters) - len(kept)
+            clusters = kept
+        clusters = clusters[:MAX_SETS]
         by_id = {r["id"]: r for r in self._records}
         result: list[list[dict]] = []
         for cluster in clusters:
@@ -78,7 +93,7 @@ class _ClusterTask(QRunnable):
             # 「残す」候補 (高解像度・大サイズ) が先頭に来るよう並べる
             cards.sort(key=lambda r: (r["width"] * r["height"], r["filesize"]), reverse=True)
             result.append(cards)
-        self.signals.done.emit(self._gen, result)
+        self.signals.done.emit(self._gen, result, hidden)
 
 
 class _ImageCard(QFrame):
@@ -166,6 +181,9 @@ class SimilarityDialog(QDialog):
         self._cards: dict[int, _ImageCard] = {}
         self._set_frames: list[tuple[QFrame, list[_ImageCard]]] = []
         self._cluster_tasks: set[_ClusterTask] = set()  # setAutoDelete(False) タスクの参照保持
+        self._ignored_sets: set[frozenset[int]] = set()  # 検出開始時に読み込む非表示指定
+        self._result_base_text = ""     # 結果ラベルの基本文 (件数サマリ)
+        self._ignored_now = 0           # この結果画面で新たに非表示指定にしたセット数
 
         layout = QVBoxLayout(self)
         self._stack = QStackedWidget()
@@ -173,6 +191,7 @@ class SimilarityDialog(QDialog):
         self._stack.addWidget(self._build_setup_page())
         self._stack.addWidget(self._build_progress_page())
         self._stack.addWidget(self._build_results_page())
+        self._refresh_ignore_summary()
 
     # ------------------------------------------------------------------
     # ページ構築
@@ -195,7 +214,18 @@ class SimilarityDialog(QDialog):
         self._include_grouped = QCheckBox("グループ内の画像も対象に含める")
         self._include_grouped.setChecked(True)
         layout.addWidget(self._include_grouped)
-        
+
+        layout.addSpacing(8)
+        ignore_row = QHBoxLayout()
+        self._ignore_summary = QLabel("")
+        self._ignore_summary.setObjectName("similarCardInfo")
+        ignore_row.addWidget(self._ignore_summary)
+        ignore_row.addStretch(1)
+        self._manage_ignores_btn = QPushButton("非表示指定の管理…")
+        self._manage_ignores_btn.clicked.connect(self._open_ignore_manager)
+        ignore_row.addWidget(self._manage_ignores_btn)
+        layout.addLayout(ignore_row)
+
         layout.addStretch(1)
         btn_row = QHBoxLayout()
         btn_row.addStretch(1)
@@ -275,6 +305,7 @@ class SimilarityDialog(QDialog):
     def _back_to_setup(self) -> None:
         self.setMinimumSize(420, 260)
         self.resize(460, 300)
+        self._refresh_ignore_summary()
         self._stack.setCurrentIndex(0)
 
     def _selected_preset(self) -> Preset:
@@ -291,8 +322,11 @@ class SimilarityDialog(QDialog):
         self._skipped = 0
         include_grouped = self._include_grouped.isChecked()
 
+        # メンバーが失われた指定 (もう再検出されない) を掃除してから読み込む
+        prune_similar_ignores()
         with get_session() as session:
             images = all_images(session)
+            self._ignored_sets = similar_ignore_sets(session)
 
         to_hash: list[dict] = []
         for img in images:
@@ -390,7 +424,7 @@ class SimilarityDialog(QDialog):
         self._progress_label.setText("比較中…")
         self._progress_bar.setRange(0, 0)  # インデターミネート
         valid = [r for r in self._records.values() if r["phash"] and r["dhash"] and r["gray"]]
-        task = _ClusterTask(self._gen, valid, self._selected_preset())
+        task = _ClusterTask(self._gen, valid, self._selected_preset(), self._ignored_sets)
         task.signals.done.connect(self._on_clusters_ready)
         self._cluster_tasks.add(task)
         task.signals.done.connect(lambda *_a, t=task: self._cluster_tasks.discard(t))
@@ -400,7 +434,8 @@ class SimilarityDialog(QDialog):
     # 結果表示
     # ------------------------------------------------------------------
 
-    def _on_clusters_ready(self, gen: int, clusters: list[list[dict]]) -> None:
+    def _on_clusters_ready(self, gen: int, clusters: list[list[dict]],
+                           hidden: int) -> None:
         if gen != self._gen:
             return
         # 前回結果をクリア
@@ -409,6 +444,7 @@ class SimilarityDialog(QDialog):
             frame.deleteLater()
         self._set_frames = []
         self._cards = {}
+        self._ignored_now = 0
 
         total_imgs = sum(len(c) for c in clusters)
         if clusters:
@@ -417,20 +453,35 @@ class SimilarityDialog(QDialog):
                 text += f"（上位 {MAX_SETS} セットのみ表示）"
             if self._skipped:
                 text += f" — スキップ: {self._skipped} 件"
-            self._result_label.setText(text)
         else:
             text = "類似画像は見つかりませんでした"
             if self._skipped:
                 text += f"（スキップ: {self._skipped} 件）"
-            self._result_label.setText(text)
+        if hidden:
+            text += f" — 非表示指定により {hidden} セットを除外"
+        self._result_base_text = text
+        self._update_result_label()
 
         for set_idx, cluster in enumerate(clusters, start=1):
             frame = QFrame()
             frame.setObjectName("similarSetFrame")
             v = QVBoxLayout(frame)
+            header_row = QHBoxLayout()
             header = QLabel(f"セット {set_idx}（{len(cluster)}枚）")
             header.setObjectName("similarSetHeader")
-            v.addWidget(header)
+            header_row.addWidget(header)
+            header_row.addStretch(1)
+            ignore_btn = QPushButton("今後表示しない")
+            ignore_btn.setToolTip(
+                "この組み合わせを次回以降の検出結果に表示しません。\n"
+                "1 枚でも増減した組み合わせは別物として表示されます。\n"
+                "解除は設定画面の「非表示指定の管理…」から行えます。"
+            )
+            # append より前なので len(self._set_frames) がこのセットの添字になる
+            ignore_btn.clicked.connect(
+                lambda _checked=False, i=len(self._set_frames): self._ignore_set(i))
+            header_row.addWidget(ignore_btn)
+            v.addLayout(header_row)
             grid = QGridLayout()
             grid.setSpacing(6)
             cards: list[_ImageCard] = []
@@ -479,6 +530,46 @@ class SimilarityDialog(QDialog):
     def _clear_checks(self) -> None:
         for card in self._cards.values():
             card.checkbox.setChecked(False)
+
+    def _ignore_set(self, index: int) -> None:
+        """このセットの組み合わせを次回以降の検出結果に出さないよう登録する。"""
+        frame, cards = self._set_frames[index]
+        alive = [c for c in cards if not c.removed]
+        if len(alive) < 2:
+            frame.setVisible(False)
+            return
+        image_ids = [c.info["id"] for c in alive]
+        add_similar_ignore(image_ids)
+        self._ignored_sets.add(frozenset(image_ids))
+        self._ignored_now += 1
+        # カードを処理済みにするとセット枠ごと非表示になる (ライブラリは変更しない)
+        self._hide_processed(alive, notify=False)
+
+    def _update_result_label(self) -> None:
+        remaining = sum(
+            1 for _frame, cards in self._set_frames
+            if sum(1 for c in cards if not c.removed) >= 2
+        )
+        if self._set_frames and remaining == 0:
+            text = "すべてのセットを処理しました"
+        else:
+            text = self._result_base_text
+        if self._ignored_now:
+            text += f"（{self._ignored_now} セットを非表示指定にしました）"
+        self._result_label.setText(text)
+
+    def _refresh_ignore_summary(self) -> None:
+        """設定ページの非表示指定件数を DB から読み直して表示する。"""
+        with get_session() as session:
+            count = len(all_similar_ignores(session))
+        self._ignore_summary.setText(
+            f"非表示指定: {count} 件" if count else "非表示指定: なし")
+        self._manage_ignores_btn.setEnabled(count > 0)
+
+    def _open_ignore_manager(self) -> None:
+        dlg = IgnoredSetsDialog(self._thumb_pool, parent=self)
+        dlg.exec()
+        self._refresh_ignore_summary()
 
     def _remove_checked(self, delete_files: bool) -> None:
         checked = [c for c in self._cards.values()
@@ -557,8 +648,12 @@ class SimilarityDialog(QDialog):
 
         self._hide_processed(checked)
 
-    def _hide_processed(self, targets: list[_ImageCard]) -> None:
-        """削除・グループ化などで処理済みになったカードを一覧から隠す。"""
+    def _hide_processed(self, targets: list[_ImageCard], notify: bool = True) -> None:
+        """削除・グループ化などで処理済みになったカードを一覧から隠す。
+
+        notify=False は非表示指定のようにライブラリ側を変更しない操作で使う
+        (メインウィンドウの再描画は不要)。
+        """
         for card in targets:
             card.removed = True
             card.setVisible(False)
@@ -574,15 +669,21 @@ class SimilarityDialog(QDialog):
                     c.removed = True
             else:
                 remaining_sets += 1
+        self._update_result_label()
         if remaining_sets == 0:
-            self._result_label.setText("すべてのセットを処理しました")
             self._remove_btn.setEnabled(False)
             self._delete_btn.setEnabled(False)
             self._group_btn.setEnabled(False)
-        if targets:
+        if notify and targets:
             self.content_changed.emit()
 
     # ------------------------------------------------------------------
+
+    def showEvent(self, event) -> None:  # type: ignore[override]
+        # アルバム切り替え後などに件数がずれないよう、表示のたび読み直す
+        if self._stack.currentIndex() == 0:
+            self._refresh_ignore_summary()
+        super().showEvent(event)
 
     def closeEvent(self, event) -> None:  # type: ignore[override]
         self._gen += 1
@@ -591,3 +692,159 @@ class SimilarityDialog(QDialog):
             self._hash_pool = None
         self._flush_pending_rows()
         super().closeEvent(event)
+
+
+class _IgnoredSetRow(QFrame):
+    """非表示指定 1 件分の行 (チェックボックス + メンバーのサムネイル)。"""
+
+    def __init__(self, ignore_id: int, members: list[dict], parent=None) -> None:
+        super().__init__(parent)
+        self.setObjectName("ignoredSetRow")
+        self.ignore_id = ignore_id
+        self._thumbs: dict[int, QLabel] = {}
+
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(8, 6, 8, 6)
+        layout.setSpacing(6)
+
+        self.checkbox = QCheckBox(f"{len(members)} 枚")
+        self.checkbox.setToolTip("\n".join(m["path"] for m in members))
+        layout.addWidget(self.checkbox, 0, Qt.AlignmentFlag.AlignVCenter)
+
+        for member in members[:IGNORE_MAX_THUMBS]:
+            thumb = QLabel()
+            thumb.setFixedSize(IGNORE_THUMB_PX, IGNORE_THUMB_PX)
+            thumb.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            thumb.setToolTip(f'{member["filename"]}\n{member["path"]}')
+            layout.addWidget(thumb)
+            self._thumbs[member["id"]] = thumb
+        if len(members) > IGNORE_MAX_THUMBS:
+            more = QLabel(f"他 {len(members) - IGNORE_MAX_THUMBS} 枚")
+            more.setObjectName("similarCardInfo")
+            layout.addWidget(more)
+        layout.addStretch(1)
+
+    def image_ids(self) -> list[int]:
+        return list(self._thumbs)
+
+    def mousePressEvent(self, event) -> None:  # type: ignore[override]
+        # 行のどこをクリックしてもチェックをトグルできるようにする
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.checkbox.toggle()
+        super().mousePressEvent(event)
+
+    def set_thumbnail(self, image_id: int, thumb_path: str) -> None:
+        thumb = self._thumbs.get(image_id)
+        if thumb is None:
+            return
+        pix = QPixmap(thumb_path)
+        if not pix.isNull():
+            thumb.setPixmap(pix.scaled(
+                IGNORE_THUMB_PX, IGNORE_THUMB_PX,
+                Qt.AspectRatioMode.KeepAspectRatio,
+                Qt.TransformationMode.SmoothTransformation,
+            ))
+
+
+class IgnoredSetsDialog(QDialog):
+    """「今後表示しない」と指定した組み合わせの一覧・解除ダイアログ。"""
+
+    def __init__(self, thumb_pool: ThumbnailWorkerPool, parent=None) -> None:
+        super().__init__(parent)
+        self.setObjectName("ignoredSetsDialog")
+        self.setWindowTitle("非表示指定の管理")
+        self.setMinimumSize(560, 400)
+        self.resize(680, 480)
+
+        self._thumb_pool = thumb_pool
+        self._rows: list[_IgnoredSetRow] = []
+        # 遅延到着したサムネイルを解決するための現在行マップ (再読込で差し替える)
+        self._rows_by_image: dict[int, list[_IgnoredSetRow]] = {}
+
+        layout = QVBoxLayout(self)
+        hint = QLabel(
+            "登録した組み合わせは、類似画像の検出結果に表示されません。\n"
+            "画像が 1 枚でも増減した組み合わせは別物として扱われ、表示されます。"
+        )
+        hint.setObjectName("similarCardInfo")
+        layout.addWidget(hint)
+
+        self._count_label = QLabel("")
+        layout.addWidget(self._count_label)
+
+        self._scroll = QScrollArea()
+        self._scroll.setWidgetResizable(True)
+        self._body = QWidget()
+        self._body_layout = QVBoxLayout(self._body)
+        self._body_layout.addStretch(1)
+        self._scroll.setWidget(self._body)
+        layout.addWidget(self._scroll, 1)
+
+        btn_row = QHBoxLayout()
+        self._delete_btn = QPushButton("チェックした指定を解除")
+        self._delete_btn.clicked.connect(self._delete_checked)
+        btn_row.addWidget(self._delete_btn)
+        clear_btn = QPushButton("チェック全解除")
+        clear_btn.clicked.connect(
+            lambda: [row.checkbox.setChecked(False) for row in self._rows])
+        btn_row.addWidget(clear_btn)
+        btn_row.addStretch(1)
+        close_btn = QPushButton("閉じる")
+        close_btn.setDefault(True)
+        close_btn.clicked.connect(self.accept)
+        btn_row.addWidget(close_btn)
+        layout.addLayout(btn_row)
+
+        self._reload()
+
+    # ------------------------------------------------------------------
+
+    def _reload(self) -> None:
+        for row in self._rows:
+            row.setParent(None)
+            row.deleteLater()
+        self._rows = []
+        self._rows_by_image = {}
+
+        # メンバーが失われた指定は表示前に掃除する (もう再検出されない)
+        prune_similar_ignores()
+        with get_session() as session:
+            entries = all_similar_ignores(session)
+            image_ids = {i for _ignore_id, ids in entries for i in ids}
+            info = {
+                img.id: {"id": img.id, "path": img.path, "filename": img.filename}
+                for img in session.execute(
+                    select(Image).where(Image.id.in_(image_ids))
+                ).scalars()
+            }
+
+        for ignore_id, ids in entries:
+            members = [info[i] for i in ids if i in info]
+            if not members:
+                continue
+            row = _IgnoredSetRow(ignore_id, members)
+            self._body_layout.insertWidget(self._body_layout.count() - 1, row)
+            self._rows.append(row)
+            for member in members[:IGNORE_MAX_THUMBS]:
+                self._rows_by_image.setdefault(member["id"], []).append(row)
+                self._thumb_pool.request(member["id"], member["path"], self._on_thumb_done)
+
+        self._count_label.setText(
+            f"{len(self._rows)} 件の組み合わせを非表示にしています"
+            if self._rows else "非表示指定はありません"
+        )
+        self._delete_btn.setEnabled(bool(self._rows))
+
+    def _on_thumb_done(self, image_id: int, thumb_path: str) -> None:
+        # 再読込後に届いた古い行への配送は _rows_by_image の差し替えで自然に落ちる
+        for row in self._rows_by_image.get(image_id, []):
+            row.set_thumbnail(image_id, thumb_path)
+
+    def _delete_checked(self) -> None:
+        checked = [row for row in self._rows if row.checkbox.isChecked()]
+        if not checked:
+            QMessageBox.information(
+                self, "非表示指定の管理", "解除する指定がチェックされていません。")
+            return
+        delete_similar_ignores([row.ignore_id for row in checked])
+        self._reload()

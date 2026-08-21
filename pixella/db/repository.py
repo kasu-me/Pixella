@@ -8,7 +8,7 @@ from pathlib import Path
 from sqlalchemy import select, or_, delete
 from sqlalchemy.orm import Session, selectinload
 
-from .models import Image, Group, Tag, get_session
+from .models import Image, Group, SimilarIgnore, Tag, get_session
 
 
 # ---------------------------------------------------------------------------
@@ -321,6 +321,76 @@ def save_image_hashes(rows: list[tuple[int, str, str, bytes, float]]) -> None:
             img.gray = gray
             img.hash_mtime = mtime
         session.commit()
+
+
+# ---------------------------------------------------------------------------
+# 類似検出の非表示指定 (組み合わせ単位)
+# ---------------------------------------------------------------------------
+
+def _ignore_signature(image_ids: list[int]) -> str:
+    """画像 ID の組み合わせを表す正規化キー ("3,17,42") を返す。"""
+    return ",".join(str(i) for i in sorted(set(image_ids)))
+
+
+def add_similar_ignore(image_ids: list[int]) -> bool:
+    """画像 ID の組み合わせを類似検出結果に表示しないよう登録する。
+
+    登録済みの組み合わせなら何もせず False を返す。
+    """
+    ids = sorted(set(image_ids))
+    if len(ids) < 2:
+        return False
+    signature = _ignore_signature(ids)
+    with get_session() as session:
+        exists = session.execute(
+            select(SimilarIgnore).where(SimilarIgnore.signature == signature)
+        ).scalar_one_or_none()
+        if exists is not None:
+            return False
+        session.add(SimilarIgnore(signature=signature))
+        session.commit()
+    return True
+
+
+def all_similar_ignores(session: Session) -> list[tuple[int, list[int]]]:
+    """登録済みの非表示指定を [(ignore_id, [image_id, ...]), ...] で新しい順に返す。"""
+    rows = session.execute(
+        select(SimilarIgnore).order_by(SimilarIgnore.id.desc())
+    ).scalars().all()
+    return [(r.id, [int(x) for x in r.signature.split(",") if x]) for r in rows]
+
+
+def similar_ignore_sets(session: Session) -> set[frozenset[int]]:
+    """検出結果のフィルタ用に、非表示指定の組み合わせを集合で返す。"""
+    return {frozenset(ids) for _ignore_id, ids in all_similar_ignores(session)}
+
+
+def delete_similar_ignores(ignore_ids: list[int]) -> None:
+    """非表示指定を解除する (次回以降その組み合わせも結果に表示される)。"""
+    if not ignore_ids:
+        return
+    with get_session() as session:
+        session.execute(delete(SimilarIgnore).where(SimilarIgnore.id.in_(ignore_ids)))
+        session.commit()
+
+
+def prune_similar_ignores() -> int:
+    """メンバー画像が 1 枚でも失われた非表示指定を削除し、削除件数を返す。
+
+    画像が減れば組み合わせ自体が別物になり二度と再検出されないため、
+    残しておいても意味がない指定を掃除する。
+    """
+    with get_session() as session:
+        alive = set(session.execute(select(Image.id)).scalars())
+        stale = [
+            ignore_id for ignore_id, ids in all_similar_ignores(session)
+            if not set(ids) <= alive
+        ]
+        if not stale:
+            return 0
+        session.execute(delete(SimilarIgnore).where(SimilarIgnore.id.in_(stale)))
+        session.commit()
+        return len(stale)
 
 
 # ---------------------------------------------------------------------------

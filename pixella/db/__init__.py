@@ -1,4 +1,4 @@
-from .models import Base, Image, Group, Tag, init_db, get_session
+from .models import Base, Image, Group, SimilarIgnore, Tag, init_db, get_session
 from .repository import (
     add_image, add_images, all_images, images_without_tags, groups_without_tags, all_groups, all_tag_names,
     all_tag_color_map, all_tags_with_count, delete_tag, set_tag_color,
@@ -7,10 +7,12 @@ from .repository import (
     export_json, export_json_combined, import_json, get_or_create_tag,
     bulk_apply_tag_delta, bulk_apply_group_tag_delta,
     cleanup_uncolored_orphan_tags, set_image_rating, set_group_rating, _do_import, _validate_import_json,
+    add_similar_ignore, all_similar_ignores, similar_ignore_sets,
+    delete_similar_ignores, prune_similar_ignores,
 )
 
 __all__ = [
-    "Base", "Image", "Group", "Tag", "init_db", "get_session",
+    "Base", "Image", "Group", "SimilarIgnore", "Tag", "init_db", "get_session",
     "add_image", "add_images", "all_images", "images_without_tags", "groups_without_tags", "all_groups", "all_tag_names",
     "all_tag_color_map", "all_tags_with_count", "delete_tag", "set_tag_color",
     "create_group", "merge_groups", "rename_group", "dissolve_group", "remove_image", "remove_image_from_group",
@@ -18,4 +20,6 @@ __all__ = [
     "export_json", "export_json_combined", "import_json", "get_or_create_tag",
     "bulk_apply_tag_delta", "bulk_apply_group_tag_delta",
     "cleanup_uncolored_orphan_tags", "set_image_rating", "set_group_rating", "_do_import", "_validate_import_json",
+    "add_similar_ignore", "all_similar_ignores", "similar_ignore_sets",
+    "delete_similar_ignores", "prune_similar_ignores",
 ]

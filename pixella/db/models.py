@@ -105,6 +105,20 @@ class Image(Base):
         return os.path.isfile(self.path)
 
 
+class SimilarIgnore(Base):
+    """類似画像検出で「今後表示しない」と指定された画像の組み合わせ。
+
+    signature は画像 ID を昇順にカンマ連結した文字列 ("3,17,42") で、
+    組み合わせそのものの同一性を表す。まったく同じ顔ぶれが再検出されたときだけ
+    非表示になり、1 枚でも増減した組み合わせ (A,B,C → A,B,C,D) は別物として表示される。
+    """
+    __tablename__ = "similar_ignores"
+
+    id:         int      = Column(Integer, primary_key=True, autoincrement=True)
+    signature:  str      = Column(String, unique=True, nullable=False, index=True)
+    created_at: datetime = Column(DateTime, default=_utcnow)
+
+
 # ---------------------------------------------------------------------------
 # Engine / Session factory
 # ---------------------------------------------------------------------------
