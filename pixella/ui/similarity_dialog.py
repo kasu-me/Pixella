@@ -68,12 +68,17 @@ class _ClusterTask(QRunnable):
             for r in self._records
         ]
         clusters = find_similar_clusters(entries, self._preset)
-        # 「今後表示しない」と指定された組み合わせ (顔ぶれ完全一致) を除外する。
+        # 「今後表示しない」と指定された組み合わせに丸ごと含まれるセットを除外する
+        # (完全一致もその一種。指定より画像が増えたセットは別物として残す)。
         # 上限で切る前に除外しないと、非表示セットが表示枠を消費してしまう。
         hidden = 0
         if self._ignored:
-            kept = [c for c in clusters if frozenset(c) not in self._ignored]
-            hidden = len(clusters) - len(kept)
+            kept = []
+            for cluster in clusters:
+                if any(frozenset(cluster) <= ig for ig in self._ignored):
+                    hidden += 1
+                else:
+                    kept.append(cluster)
             clusters = kept
         clusters = clusters[:MAX_SETS]
         by_id = {r["id"]: r for r in self._records}
@@ -473,8 +478,9 @@ class SimilarityDialog(QDialog):
             header_row.addStretch(1)
             ignore_btn = QPushButton("今後表示しない")
             ignore_btn.setToolTip(
-                "この組み合わせを次回以降の検出結果に表示しません。\n"
-                "1 枚でも増減した組み合わせは別物として表示されます。\n"
+                "この組み合わせと、その一部だけが検出されたセットを\n"
+                "次回以降の検出結果に表示しません。\n"
+                "画像が増えた組み合わせは別物として表示されます。\n"
                 "解除は設定画面の「非表示指定の管理…」から行えます。"
             )
             # append より前なので len(self._set_frames) がこのセットの添字になる
@@ -540,7 +546,11 @@ class SimilarityDialog(QDialog):
             return
         image_ids = [c.info["id"] for c in alive]
         add_similar_ignore(image_ids)
-        self._ignored_sets.add(frozenset(image_ids))
+        # DB 側の正規化 (包含される指定は極大な指定に統一) に手元の集合も合わせる
+        new = frozenset(image_ids)
+        if not any(new <= ig for ig in self._ignored_sets):
+            self._ignored_sets = {ig for ig in self._ignored_sets if not ig < new}
+            self._ignored_sets.add(new)
         self._ignored_now += 1
         # カードを処理済みにするとセット枠ごと非表示になる (ライブラリは変更しない)
         self._hide_processed(alive, notify=False)
@@ -763,8 +773,9 @@ class IgnoredSetsDialog(QDialog):
 
         layout = QVBoxLayout(self)
         hint = QLabel(
-            "登録した組み合わせは、類似画像の検出結果に表示されません。\n"
-            "画像が 1 枚でも増減した組み合わせは別物として扱われ、表示されます。"
+            "登録した組み合わせと、その一部だけが検出されたセットは\n"
+            "類似画像の検出結果に表示されません。\n"
+            "画像が増えた組み合わせは別物として扱われ、表示されます。"
         )
         hint.setObjectName("similarCardInfo")
         layout.addWidget(hint)

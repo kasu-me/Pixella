@@ -335,19 +335,25 @@ def _ignore_signature(image_ids: list[int]) -> str:
 def add_similar_ignore(image_ids: list[int]) -> bool:
     """画像 ID の組み合わせを類似検出結果に表示しないよう登録する。
 
-    登録済みの組み合わせなら何もせず False を返す。
+    非表示指定は包含関係で正規化し、極大な組み合わせだけを残す:
+    既存の指定に包含される組み合わせ (完全一致を含む) は既にその指定で隠れるので登録せず、
+    逆に既存の指定を包含する場合は包含される側を削除して新しい指定に統一する。
+    実際に登録したときだけ True を返す。
     """
-    ids = sorted(set(image_ids))
+    ids = frozenset(image_ids)
     if len(ids) < 2:
         return False
-    signature = _ignore_signature(ids)
     with get_session() as session:
-        exists = session.execute(
-            select(SimilarIgnore).where(SimilarIgnore.signature == signature)
-        ).scalar_one_or_none()
-        if exists is not None:
-            return False
-        session.add(SimilarIgnore(signature=signature))
+        subsumed: list[int] = []
+        for ignore_id, existing in all_similar_ignores(session):
+            members = frozenset(existing)
+            if ids <= members:
+                return False            # 既存指定に覆われている
+            if members < ids:
+                subsumed.append(ignore_id)
+        if subsumed:
+            session.execute(delete(SimilarIgnore).where(SimilarIgnore.id.in_(subsumed)))
+        session.add(SimilarIgnore(signature=_ignore_signature(sorted(ids))))
         session.commit()
     return True
 
@@ -361,7 +367,10 @@ def all_similar_ignores(session: Session) -> list[tuple[int, list[int]]]:
 
 
 def similar_ignore_sets(session: Session) -> set[frozenset[int]]:
-    """検出結果のフィルタ用に、非表示指定の組み合わせを集合で返す。"""
+    """検出結果のフィルタ用に、非表示指定の組み合わせを集合で返す。
+
+    検出セットがこのいずれかの部分集合なら非表示にする (完全一致もその一種)。
+    """
     return {frozenset(ids) for _ignore_id, ids in all_similar_ignores(session)}
 
 
@@ -375,22 +384,34 @@ def delete_similar_ignores(ignore_ids: list[int]) -> None:
 
 
 def prune_similar_ignores() -> int:
-    """メンバー画像が 1 枚でも失われた非表示指定を削除し、削除件数を返す。
+    """意味を失った非表示指定を掃除し、削除件数を返す。
 
-    画像が減れば組み合わせ自体が別物になり二度と再検出されないため、
-    残しておいても意味がない指定を掃除する。
+    - メンバー画像が失われた指定: 顔ぶれが変わるので二度と再検出されない
+    - 他の指定に包含される指定: 包含する側だけで同じセットが隠れるので冗長
+      ([A,B,C] は [A,B,C,D] に吸収され、極大な組み合わせだけが残る)
+
+    どちらも検出結果の見え方を変えずに削除できる。メンバー欠落の判定を先に行うのは、
+    欠落した側 ([A,B,C,D] の D が消えた等) に包含されていただけの指定を巻き添えで
+    消さないため。
     """
     with get_session() as session:
         alive = set(session.execute(select(Image.id)).scalars())
-        stale = [
-            ignore_id for ignore_id, ids in all_similar_ignores(session)
-            if not set(ids) <= alive
+        entries = [
+            (ignore_id, frozenset(ids))
+            for ignore_id, ids in all_similar_ignores(session)
         ]
-        if not stale:
+        stale = {i for i, ids in entries if not ids <= alive}
+        remain = [(i, ids) for i, ids in entries if i not in stale]
+        subsumed = {
+            i for i, ids in remain
+            if any(other_id != i and ids < other for other_id, other in remain)
+        }
+        removed = stale | subsumed
+        if not removed:
             return 0
-        session.execute(delete(SimilarIgnore).where(SimilarIgnore.id.in_(stale)))
+        session.execute(delete(SimilarIgnore).where(SimilarIgnore.id.in_(list(removed))))
         session.commit()
-        return len(stale)
+        return len(removed)
 
 
 # ---------------------------------------------------------------------------
