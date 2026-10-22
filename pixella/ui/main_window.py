@@ -20,7 +20,7 @@ from pixella.db import (
     remove_image, remove_image_from_group, set_image_tags, set_group_tags, search_by_tags,
     export_json, export_json_combined, import_json,
     bulk_apply_tag_delta, bulk_apply_group_tag_delta,
-    cleanup_uncolored_orphan_tags, set_image_rating, set_group_rating, _do_import, _validate_import_json,
+    cleanup_uncolored_orphan_tags, set_image_rating, set_group_rating, set_image_memo, set_group_memo, _do_import, _validate_import_json,
 )
 from pixella.db.models import Image, Group, Tag
 from sqlalchemy import select
@@ -114,6 +114,7 @@ class MainWindow(QMainWindow):
         self._sort_bar.blockSignals(False)
 
     def closeEvent(self, event) -> None:  # type: ignore[override]
+        self._detail.commit_pending_memo()
         s = self._settings()
         s.setValue("window/geometry", self.saveGeometry())
         self._save_sort()
@@ -239,6 +240,7 @@ class MainWindow(QMainWindow):
         self._detail.tags_copy_requested.connect(self._on_tags_copy)
         self._detail.tags_paste_requested.connect(self._on_tags_paste)
         self._detail.rating_changed.connect(self._on_detail_rating_changed)
+        self._detail.memo_committed.connect(self._on_detail_memo_committed)
 
         splitter.addWidget(self._grid)
         splitter.addWidget(self._detail)
@@ -416,6 +418,24 @@ class MainWindow(QMainWindow):
         set_ids = {i.id for i in items}
         if len(selected) == 1 and isinstance(selected[0], (Image, Group)) and selected[0].id in set_ids:
             self._detail.update_rating_display(rating)
+
+    def _on_detail_memo_committed(self, item, memo: str) -> None:
+        """詳細パネルのメモ確定 → 編集対象だったアイテムに保存し、キャッシュも同期する。
+
+        確定は選択切替の後に届くことがあるため、グリッドの現選択ではなく通知された item に保存する。
+        """
+        if isinstance(item, Image):
+            set_image_memo(item.id, memo)
+            cache = self._cached_images
+        elif isinstance(item, Group):
+            set_group_memo(item.id, memo)
+            cache = self._cached_groups
+        else:
+            return
+        for cached in cache:
+            if cached.id == item.id:
+                cached.memo = memo
+                break
 
     # ------------------------------------------------------------------
     # Album management

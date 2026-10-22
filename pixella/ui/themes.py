@@ -98,6 +98,17 @@ QLineEdit:focus {
     border: 1.5px solid #3c82f6;
 }
 
+QPlainTextEdit#memoEdit {
+    background-color: #ffffff;
+    border: 1px solid #b0b0b0;
+    border-radius: 5px;
+    padding: 2px 4px;
+}
+
+QPlainTextEdit#memoEdit:focus {
+    border: 1.5px solid #3c82f6;
+}
+
 QPushButton {
     background-color: #e8e8e8;
     border: 1px solid #bdbdbd;
@@ -702,6 +713,18 @@ QLineEdit {
 }
 
 QLineEdit:focus {
+    border: 1.5px solid #89b4fa;
+}
+
+QPlainTextEdit#memoEdit {
+    background-color: #313244;
+    border: 1px solid #45475a;
+    border-radius: 5px;
+    padding: 2px 4px;
+    color: #cdd6f4;
+}
+
+QPlainTextEdit#memoEdit:focus {
     border: 1.5px solid #89b4fa;
 }
 

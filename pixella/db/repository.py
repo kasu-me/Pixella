@@ -458,6 +458,46 @@ def set_group_rating(group_ids: list[int], rating: int) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Memo
+# ---------------------------------------------------------------------------
+
+def _normalize_memo(text: object) -> str:
+    """メモ本文を保存用に正規化する（改行コードを LF に統一し、空白のみは空扱い）。"""
+    if not isinstance(text, str) or not text:
+        return ""
+    text = text.replace("\r\n", "\n").replace("\r", "\n")
+    return text if text.strip() else ""
+
+
+def _merge_memos(memos) -> str:
+    """複数アイテムのメモを1つに集約する（空・重複を除き、空行区切りで連結）。"""
+    parts: list[str] = []
+    for m in memos:
+        m = _normalize_memo(m).strip()
+        if m and m not in parts:
+            parts.append(m)
+    return "\n\n".join(parts)
+
+
+def set_image_memo(image_id: int, memo: str) -> None:
+    """画像のメモ（自由記述・改行可）を保存する。"""
+    with get_session() as session:
+        img = session.get(Image, image_id)
+        if img is not None:
+            img.memo = _normalize_memo(memo)
+            session.commit()
+
+
+def set_group_memo(group_id: int, memo: str) -> None:
+    """グループのメモを保存する。グループタグ同様、グループ自身が独立して持つ。"""
+    with get_session() as session:
+        grp = session.get(Group, group_id)
+        if grp is not None:
+            grp.memo = _normalize_memo(memo)
+            session.commit()
+
+
+# ---------------------------------------------------------------------------
 # Group CRUD
 # ---------------------------------------------------------------------------
 
@@ -473,19 +513,23 @@ def create_group(session: Session, name: str, image_ids: list[int]) -> Group:
     session.add(group)
     session.flush()  # get id
 
-    # 画像のタグをマージしてグループに設定、画像からは外す
+    # 画像のタグ・メモをマージしてグループに設定、画像からは外す
     # レーティングはグループ内画像では一旦リセット（グループ解除時にグループの星を適用する）
     seen_ids: set[int] = set()
     merged_tags: list = []
+    memos: list[str] = []
     for img in images:
         for tag in img.tags:
             if tag.id not in seen_ids:
                 seen_ids.add(tag.id)
                 merged_tags.append(tag)
+        memos.append(img.memo)
         img.tags = []
         img.rating = 0
+        img.memo = ""
         img.group_id = group.id
     group.tags = merged_tags
+    group.memo = _merge_memos(memos)
 
     if images:
         group.cover_image_id = images[0].id
@@ -502,7 +546,7 @@ def rename_group(session: Session, group_id: int, new_name: str) -> None:
 
 
 def dissolve_group(session: Session, group: Group) -> None:
-    """グループを解除し、グループのタグを全メンバー画像に付与する。"""
+    """グループを解除し、グループのタグ・レーティング・メモを全メンバー画像に引き継ぐ。"""
     # 関連を確実にロード
     full_group = session.execute(
         select(Group).where(Group.id == group.id)
@@ -516,6 +560,7 @@ def dissolve_group(session: Session, group: Group) -> None:
 
     group_tags = list(full_group.tags)
     group_rating = full_group.rating or 0
+    group_memo = full_group.memo or ""
     for img in list(full_group.images):
         if group_tags:
             existing_ids = {t.id for t in img.tags}
@@ -524,6 +569,8 @@ def dissolve_group(session: Session, group: Group) -> None:
                     img.tags.append(tag)
         # グループのレーティングを各メンバー画像へ適用
         img.rating = group_rating
+        # グループのメモを各メンバー画像へ付与（画像側に残存メモがあれば連結）
+        img.memo = _merge_memos([img.memo, group_memo])
         img.group_id = None
     session.delete(full_group)
     session.flush()
@@ -626,8 +673,13 @@ def merge_groups(
         + list(extra_images)
     )
 
+    # メモはソースグループ → 移動対象画像の順に集約する
+    merged_memo = _merge_memos(
+        [grp.memo for grp in source_groups] + [img.memo for img in all_images_to_move]
+    )
+
     # ---- フェーズ3: 新グループ作成 ----
-    new_group = Group(name=name)
+    new_group = Group(name=name, memo=merged_memo)
     session.add(new_group)
     session.flush()  # new_group.id を確定
 
@@ -645,6 +697,7 @@ def merge_groups(
     for img in all_images_to_move:
         img.tags.clear()       # 個別タグをグループタグに集約
         img.rating = 0         # グループ内画像のレーティングはリセット
+        img.memo = ""          # 個別メモはグループメモに集約済み
         img.group = new_group  # ← カラム直接代入ではなくリレーションシップで移動
 
     # ---- フェーズ6: UPDATE images.group_id + DELETE image_tag を確定 ----
@@ -786,6 +839,7 @@ def _export_to_dict(session: Session) -> dict:
                 "group_id": img.group_id,
                 "ctime": img.ctime,
                 "rating": img.rating or 0,
+                "memo": img.memo or "",
                 "phash": img.phash,
                 "dhash": img.dhash,
                 "hash_mtime": img.hash_mtime,
@@ -799,6 +853,7 @@ def _export_to_dict(session: Session) -> dict:
                 "name": g.name,
                 "cover_image_id": g.cover_image_id,
                 "rating": g.rating or 0,
+                "memo": g.memo or "",
                 "tags": [t.name for t in g.tags],
                 "image_ids": [img.id for img in g.images],
             }
@@ -907,6 +962,7 @@ def _do_import(session: Session, data: dict) -> None:
             path=Path(img_data["path"]).as_posix(),
             ctime=img_data.get("ctime"),
             rating=_clamp_rating(img_data.get("rating", 0)),
+            memo=_normalize_memo(img_data.get("memo")),
             phash=img_data.get("phash"),
             dhash=img_data.get("dhash"),
             hash_mtime=img_data.get("hash_mtime"),
@@ -924,7 +980,11 @@ def _do_import(session: Session, data: dict) -> None:
 
     # グループを再作成
     for grp_data in data["groups"]:
-        grp = Group(name=grp_data["name"], rating=_clamp_rating(grp_data.get("rating", 0)))
+        grp = Group(
+            name=grp_data["name"],
+            rating=_clamp_rating(grp_data.get("rating", 0)),
+            memo=_normalize_memo(grp_data.get("memo")),
+        )
         session.add(grp)
         session.flush()
 

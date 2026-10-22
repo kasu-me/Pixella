@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from sqlalchemy import (
-    Column, DateTime, Float, ForeignKey, Integer, LargeBinary, String, Table, create_engine
+    Column, DateTime, Float, ForeignKey, Integer, LargeBinary, String, Table, Text, create_engine
 )
 from sqlalchemy.orm import DeclarativeBase, Session, relationship, sessionmaker
 
@@ -69,6 +69,7 @@ class Group(Base):
     cover_image_id: int | None = Column(Integer, ForeignKey("images.id", ondelete="SET NULL"), nullable=True)
     created_at:    datetime = Column(DateTime, default=_utcnow)
     rating:        int      = Column(Integer, nullable=False, default=0, server_default="0")
+    memo:          str      = Column(Text, nullable=False, default="", server_default="")  # 自由記述メモ（改行可）
 
     images:      list["Image"] = relationship("Image", back_populates="group", foreign_keys="Image.group_id")
     cover_image: "Image | None" = relationship("Image", foreign_keys=[cover_image_id])
@@ -84,6 +85,7 @@ class Image(Base):
     added_at:   datetime       = Column(DateTime, default=_utcnow)
     ctime:      float | None   = Column(Float, nullable=True)
     rating:     int            = Column(Integer, nullable=False, default=0, server_default="0")
+    memo:       str            = Column(Text, nullable=False, default="", server_default="")  # 自由記述メモ（改行可）
     # 類似画像検出用 perceptual hash (16桁hex)。未計算は NULL、検出実行時に遅延計算する
     phash:      str | None     = Column(String, nullable=True)
     dhash:      str | None     = Column(String, nullable=True)
@@ -159,9 +161,15 @@ def init_db(db_path: str | Path) -> None:
         if "gray" not in img_cols:
             conn.exec_driver_sql("ALTER TABLE images ADD COLUMN gray BLOB")
             conn.commit()
+        if "memo" not in img_cols:
+            conn.exec_driver_sql("ALTER TABLE images ADD COLUMN memo TEXT NOT NULL DEFAULT ''")
+            conn.commit()
         grp_cols = [row[1] for row in conn.exec_driver_sql("PRAGMA table_info(groups)")]
         if "rating" not in grp_cols:
             conn.exec_driver_sql("ALTER TABLE groups ADD COLUMN rating INTEGER NOT NULL DEFAULT 0")
+            conn.commit()
+        if "memo" not in grp_cols:
+            conn.exec_driver_sql("ALTER TABLE groups ADD COLUMN memo TEXT NOT NULL DEFAULT ''")
             conn.commit()
     # バックフィル: ctime が NULL の既存レコードにファイルシステムから取得して埋める
     _SessionLocal = sessionmaker(bind=engine, expire_on_commit=False)

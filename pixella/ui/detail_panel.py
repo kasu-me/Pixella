@@ -13,6 +13,7 @@ from PySide6.QtWidgets import (
 from pixella.db.models import Image, Group
 from pixella.ui.tag_input import TagInputWidget
 from pixella.ui.star_rating import StarRating
+from pixella.ui.memo_edit import MemoEdit
 
 
 class _SectionTitle(QLabel):
@@ -33,12 +34,15 @@ class DetailPanel(QWidget):
     tags_copy_requested  = Signal()            # タグをコピーボタン
     tags_paste_requested = Signal()            # タグを貼り付けボタン
     rating_changed       = Signal(int)         # レーティング変更 (0〜5) — 現在選択中の画像に適用
+    memo_committed       = Signal(object, str) # (Image|Group, memo) — 編集対象アイテムのメモ確定
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
         self._current: Image | Group | None = None
         self._current_multi: list[Image] = []
         self._current_multi_groups: list[Group] = []
+        # メモの保存先。選択切替後に確定通知が来ても編集元へ保存できるよう別に保持する
+        self._memo_target: Image | Group | None = None
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(8, 8, 8, 8)
@@ -100,7 +104,7 @@ class DetailPanel(QWidget):
         layout.addWidget(self._tag_input)
 
         # グループ所属画像の場合に表示する警告ノート
-        self._grouped_note = QLabel("ℹ この画像はグループに所属しています。\nタグはグループ側で管理されます。")
+        self._grouped_note = QLabel("ℹ この画像はグループに所属しています。\nタグ・レーティング・メモはグループ側で管理されます。")
         self._grouped_note.setObjectName("groupedNote")
         self._grouped_note.setWordWrap(True)
         self._grouped_note.setVisible(False)
@@ -137,6 +141,20 @@ class DetailPanel(QWidget):
         self._group_rename_section.setVisible(False)
         layout.addWidget(self._group_rename_section)
 
+        # Memo section (単一アイテム選択時。残りの縦スペースを使う)
+        self._memo_section = QWidget()
+        memo_layout = QVBoxLayout(self._memo_section)
+        memo_layout.setContentsMargins(0, 0, 0, 0)
+        memo_layout.setSpacing(2)
+        memo_layout.addWidget(_SectionTitle("メモ"))
+        self._memo_edit = MemoEdit()
+        self._memo_edit.setPlaceholderText("自由にメモを入力（改行可）")
+        self._memo_edit.setMinimumHeight(80)
+        self._memo_edit.memo_committed.connect(self._on_memo_committed)
+        memo_layout.addWidget(self._memo_edit)
+        self._memo_section.setVisible(False)
+        layout.addWidget(self._memo_section, 1)
+
         layout.addStretch()
 
     # ------------------------------------------------------------------
@@ -156,6 +174,10 @@ class DetailPanel(QWidget):
     def update_rating_display(self, value: int) -> None:
         """星表示をプログラム的に更新する（rating_changed は発火しない）。"""
         self._rating.set_rating(value)
+
+    def commit_pending_memo(self) -> None:
+        """編集中で未確定のメモがあれば確定させる（ウィンドウを閉じる前など）。"""
+        self._memo_edit.commit()
 
     def show_image(self, image: Image) -> None:
         self._current = image
@@ -184,6 +206,9 @@ class DetailPanel(QWidget):
             self._tag_input.setVisible(True)
             self._grouped_note.setVisible(False)
             self._tag_input.set_tags([t.name for t in image.tags])
+
+        # メモ（グループ所属画像はグループ側で管理するため非表示）
+        self._bind_memo(None if image.group else image)
 
         # group info
         self._group_section.setVisible(True)
@@ -222,6 +247,8 @@ class DetailPanel(QWidget):
             common = set()
         self._tag_input.set_tags(sorted(common))
         self._group_section.setVisible(False)
+        # メモは自由記述で一括編集の意味が定まらないため単一選択時のみ
+        self._bind_memo(None)
 
         # レーティング: 選択中の全アイテム（画像・グループ）の共通値を表示し、操作で一括適用
         if all_items:
@@ -249,6 +276,7 @@ class DetailPanel(QWidget):
         self._tag_input.set_tags([t.name for t in group.tags])
         self._rating.set_rating(group.rating or 0)
         self._rating_section.setVisible(True)
+        self._bind_memo(group)
         self._group_section.setVisible(False)
         self._group_rename_section.setVisible(True)
 
@@ -262,6 +290,7 @@ class DetailPanel(QWidget):
         self._tag_input.setVisible(True)
         self._grouped_note.setVisible(False)
         self._rating_section.setVisible(False)
+        self._bind_memo(None)
         self._group_section.setVisible(False)
         self._group_rename_section.setVisible(False)
 
@@ -282,6 +311,30 @@ class DetailPanel(QWidget):
                     Qt.TransformationMode.SmoothTransformation,
                 )
             )
+
+    def _bind_memo(self, target: Image | Group | None) -> None:
+        """メモ欄の編集対象を切り替える。前の対象に未確定の編集があれば先に確定する。"""
+        prev = self._memo_target
+        if (
+            prev is not None and target is not None
+            and type(prev) is type(target) and prev.id == target.id
+        ):
+            # 同一アイテムの再表示（タグ変更後のリロード等）: 入力中の内容とカーソルを保つ
+            self._memo_target = target
+            if not self._memo_edit.is_dirty() and self._memo_edit.toPlainText() != (target.memo or ""):
+                self._memo_edit.set_memo(target.memo or "")
+            return
+        self._memo_edit.commit()
+        self._memo_target = target
+        self._memo_edit.set_memo(target.memo if target is not None else "")
+        self._memo_section.setVisible(target is not None)
+
+    def _on_memo_committed(self, memo: str) -> None:
+        target = self._memo_target
+        if target is None:
+            return
+        target.memo = memo
+        self.memo_committed.emit(target, memo)
 
     def _on_tags_changed(self, tags: list[str]) -> None:
         # 単一項目選択時のみ使用（複数選択時は tag_added / tag_removed 経由）
