@@ -72,7 +72,7 @@ LIGHT = """
 QMainWindow, QWidget {
     background-color: #f5f5f5;
     color: #1a1a1a;
-    font-family: "Yu Gothic UI", "Segoe UI", sans-serif;
+    font-family: "@@FONT_FAMILY@@";
     font-size: 10pt;
 }
 
@@ -689,7 +689,7 @@ DARK = """
 QMainWindow, QWidget {
     background-color: #1e1e2e;
     color: #cdd6f4;
-    font-family: "Yu Gothic UI", "Segoe UI", sans-serif;
+    font-family: "@@FONT_FAMILY@@";
     font-size: 10pt;
 }
 
@@ -1310,10 +1310,29 @@ QListWidget#completionPopup::item:selected {
 """
 
 
+_FONT_CANDIDATES = ("Yu Gothic UI", "Segoe UI")
+
+
+def _ui_font_family() -> str:
+    """QSS に書く UI フォントを、インストール済みの候補から1つだけ選んで返す。
+
+    QSS の ``font-family`` に複数ファミリーを並べると、Qt は初回のフォント解決時に
+    フォールバック候補を全インストールフォントから計算する。フォントが数千ある環境では
+    これだけで起動が 1.5 秒以上遅れるため、候補の選択は Python 側で済ませて単一指定にする。
+    """
+    from PySide6.QtGui import QFontDatabase
+
+    for family in _FONT_CANDIDATES:
+        if QFontDatabase.hasFamily(family):
+            return family
+    return _FONT_CANDIDATES[0]
+
+
 def apply_theme(app, dark: bool) -> None:
     icons = _indicator_icons()
     qss = DARK if dark else LIGHT
     suffix = "dark" if dark else "light"
+    qss = qss.replace("@@FONT_FAMILY@@", _ui_font_family())
     qss = qss.replace("@@CHECK_ICON@@", icons[f"check_{suffix}"])
     qss = qss.replace("@@RADIO_DOT@@", icons[f"dot_{suffix}"])
     app.setStyleSheet(qss)
